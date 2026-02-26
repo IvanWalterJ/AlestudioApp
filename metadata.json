@@ -1,0 +1,7 @@
+{
+  "name": "Tattoo Studio AI",
+  "description": "Advanced AI-powered tattoo design and virtual try-on application.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
