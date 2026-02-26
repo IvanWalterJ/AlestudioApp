@@ -48,7 +48,7 @@ For each concept, provide:
 
 export async function generateTattooImage(technicalPrompt: string, style?: string): Promise<string> {
   const styleInstruction = style ? ` MUST BE STRICTLY IN ${style.toUpperCase()} TATTOO STYLE.` : '';
-  
+
   const response = await ai.models.generateContent({
     model: 'gemini-2.5-flash-image',
     contents: {
@@ -70,19 +70,31 @@ export async function generateTattooImage(technicalPrompt: string, style?: strin
       return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
     }
   }
-  
+
   throw new Error("No image generated");
 }
 
 export async function generateFinalTryOn(composedImageBase64: string): Promise<string> {
-  const prompt = `You are a high-end photo retoucher. I am providing an image of a person with a digital tattoo mockup already placed on their body.
-Your task is to enhance this image to make the tattoo look 100% photorealistic and embedded in the skin.
+  const prompt = `You are a world-class AI tattoo adaptation specialist. I am providing an image of a person with a digital tattoo mockup placed on their body.
+Your task is to merge this tattoo into the body with absolute photorealism and anatomical accuracy.
 
 CRITICAL INSTRUCTIONS:
-1. DO NOT change the person's face, body, or the background. Keep them exactly as they are.
-2. DO NOT change the shape, size, or placement of the tattoo design.
-3. Enhance the blending: Add realistic skin texture over the ink, apply subtle subsurface scattering, and ensure the lighting on the tattoo perfectly matches the lighting on the body.
-4. The final output MUST look like an unedited, real photograph of a healed tattoo.`;
+1. ANATOMICAL ADAPTATION (THE MOST IMPORTANT): 
+   - If the tattoo mockup is larger than the body part (e.g., wrap around a branch, muscle, or torso), you MUST simulate the design wrapping around the curvature of the body.
+   - Parts of the design that would logically "go behind" the limb or body part must be HIDDEN. 
+   - The design must NOT stay "in the air" or floating outside the skin. It must conform strictly to the biological boundaries of the person.
+   - Apply geometric distortion as if the design were projected onto a 3D cylindrical or organic surface (the body).
+
+2. CONSISTENCY:
+   - DO NOT change the person's identity, face, clothing, or the background.
+   - DO NOT change the core design of the tattoo, but DO adapt its perspective and warp it to fit the body's shape.
+
+3. BLENDING:
+   - Apply realistic skin texture (pores, hair, fine lines) over the ink.
+   - Adjust lighting, highlights, and shadows on the tattoo to perfectly match the environment and the body's contours.
+   - Use 'Multiply' style blending but with intelligent opacity adjustment for skin highlights.
+
+The final result must look like a real, healed photograph taken with a professional camera.`;
 
   const response = await ai.models.generateContent({
     model: 'gemini-2.5-flash-image',
@@ -106,6 +118,6 @@ CRITICAL INSTRUCTIONS:
       return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
     }
   }
-  
+
   throw new Error("No image generated");
 }
