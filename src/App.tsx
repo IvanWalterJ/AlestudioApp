@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Loader2, Sparkles, ArrowRight, CheckCircle2, Upload, Camera, X, RefreshCw, SlidersHorizontal, Download, Eraser, Move, Undo, Redo, Calendar, Crown } from 'lucide-react';
+import { Loader2, Sparkles, ArrowRight, CheckCircle2, Upload, Camera, X, RefreshCw, SlidersHorizontal, Download, Eraser, Move, Undo, Redo, Calendar, Crown, ArrowLeft } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 import { generateConcepts, generateTattooImage, generateFinalTryOn } from './services/ai';
 import type { TattooFormData, TattooConcept } from './types';
 
@@ -256,13 +257,25 @@ export default function App() {
   }, [selectedConcept?.imageUrl, step]);
 
   useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const resizeObserver = new ResizeObserver(() => {
+      drawCanvas();
+    });
+
+    resizeObserver.observe(container);
+    return () => resizeObserver.disconnect();
+  }, [step]);
+
+  useEffect(() => {
     drawCanvas();
-  }, [tattooPos, tattooScale, tattooRotation, tattooOpacity, eraserStrokes, bodyImage]);
+  }, [tattooPos, tattooScale, tattooRotation, tattooOpacity, eraserStrokes, bodyImage, step]);
 
   const drawCanvas = () => {
     const canvas = canvasRef.current;
     const container = containerRef.current;
-    if (!canvas || !container) return;
+    if (!canvas || !container || container.offsetWidth === 0) return;
 
     if (canvas.width !== container.offsetWidth || canvas.height !== container.offsetHeight) {
       canvas.width = container.offsetWidth;
@@ -431,9 +444,23 @@ export default function App() {
       {/* Header */}
       <header className="border-b border-zinc-900 bg-zinc-950/50 backdrop-blur-xl sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Crown className="w-8 h-8 text-zinc-100" />
-            <span className="text-xl font-bold tracking-widest uppercase">AL ESTILO ESTUDIO</span>
+          <div className="flex items-center gap-3 group cursor-pointer" onClick={() => {
+            if (step !== 1) {
+              if (confirm('¿Deseas volver al inicio? Se perderá el progreso actual.')) {
+                setStep(1);
+                setBodyImage(null);
+                setFinalTryOnImage(null);
+                setSelectedConcept(null);
+              }
+            }
+          }}>
+            <div className="relative">
+              <div className="absolute inset-0 bg-zinc-100 blur-md opacity-20 group-hover:opacity-40 transition-opacity"></div>
+              <Crown className="w-8 h-8 text-zinc-100 relative z-10" />
+            </div>
+            <span className="text-xl font-black tracking-[0.15em] uppercase bg-gradient-to-r from-zinc-100 via-zinc-300 to-zinc-500 bg-clip-text text-transparent">
+              AL ESTILO ESTUDIO
+            </span>
           </div>
           <div className="hidden md:flex items-center gap-4 text-sm font-medium text-zinc-500">
             <span className={step >= 1 ? "text-zinc-50" : ""}>01. Brief</span>
@@ -452,10 +479,18 @@ export default function App() {
       </header>
 
       <main className="max-w-7xl mx-auto px-6 py-12">
-        {/* Step 1: Brief */}
-        {step === 1 && (
-          <div className="max-w-2xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-700">
-            <h1 className="text-5xl font-light tracking-tight mb-4">Crea tu diseño.</h1>
+        <AnimatePresence mode="wait">
+          {/* Step 1: Brief */}
+          {step === 1 && (
+            <motion.div 
+              key="step1"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              transition={{ duration: 0.4 }}
+              className="max-w-2xl mx-auto"
+            >
+              <h1 className="text-5xl font-light tracking-tight mb-4">Crea tu diseño.</h1>
             <p className="text-zinc-400 text-lg mb-12 leading-relaxed">Describe tu idea, elige un estilo y deja que la IA genere conceptos únicos para tu próximo tatuaje.</p>
             
             <form onSubmit={handleGenerateConcepts} className="space-y-8 bg-zinc-900/30 p-8 rounded-3xl border border-zinc-800/50">
@@ -468,11 +503,33 @@ export default function App() {
                 >
                   <option>Blackwork</option>
                   <option>Tradicional (Old School)</option>
-                  <option>Realismo</option>
+                  <option>Neotradicional</option>
+                  <option>Realismo (Blanco y Negro)</option>
+                  <option>Realismo (Color)</option>
+                  <option>Micro-realismo</option>
                   <option>Minimalista / Fineline</option>
                   <option>Japonés (Irezumi)</option>
-                  <option>Acuarela</option>
+                  <option>Acuarela (Watercolor)</option>
                   <option>Geométrico</option>
+                  <option>Dotwork (Puntillismo)</option>
+                  <option>Tribal / Polinesio</option>
+                  <option>Maorí</option>
+                  <option>Trash Polka</option>
+                  <option>Ignorant Style</option>
+                  <option>Black and Grey</option>
+                  <option>Biomecánico</option>
+                  <option>Lettering / Caligrafía</option>
+                  <option>Anime / Otaku</option>
+                  <option>Sketch (Boceto)</option>
+                  <option>Surrealismo</option>
+                  <option>Chicano</option>
+                  <option>Ornamental / Mehndi</option>
+                  <option>Handpoke</option>
+                  <option>New School</option>
+                  <option>Celta</option>
+                  <option>Abstracto</option>
+                  <option>Glitch</option>
+                  <option>Cyberpunk</option>
                 </select>
               </div>
 
@@ -515,22 +572,30 @@ export default function App() {
               <button 
                 type="submit"
                 disabled={!formData.meaning || isGenerating}
-                className="w-full bg-zinc-100 text-zinc-950 font-medium rounded-xl p-4 flex items-center justify-center gap-2 hover:bg-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed mt-4"
+                className="w-full relative overflow-hidden bg-zinc-100 text-zinc-950 font-medium rounded-xl p-4 flex items-center justify-center gap-2 hover:bg-white transition-all disabled:opacity-80 disabled:cursor-not-allowed mt-4 group"
               >
                 {isGenerating ? (
-                  <><Loader2 className="w-5 h-5 animate-spin" /> Generando conceptos...</>
+                  <span className="flex items-center gap-2 animate-pulse">
+                    <Loader2 className="w-5 h-5 animate-spin" /> Creando magia...
+                  </span>
                 ) : (
                   <><Sparkles className="w-5 h-5" /> Generar Ideas</>
                 )}
               </button>
             </form>
-          </div>
+            </motion.div>
         )}
 
-        {/* Step 2: Concepts & Designs */}
-        {step === 2 && (
-          <div className="animate-in fade-in slide-in-from-bottom-4 duration-700">
-            <div className="flex flex-col md:flex-row md:items-end justify-between mb-12 gap-6">
+          {/* Step 2: Concepts & Designs */}
+          {step === 2 && (
+            <motion.div 
+              key="step2"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              transition={{ duration: 0.4 }}
+            >
+              <div className="flex flex-col md:flex-row md:items-end justify-between mb-12 gap-6">
               <div>
                 <h1 className="text-4xl font-light tracking-tight mb-2">Elige tu diseño.</h1>
                 <p className="text-zinc-400">Selecciona el concepto que más te guste para probarlo en tu piel.</p>
@@ -550,9 +615,10 @@ export default function App() {
                 <div key={idx} className="group bg-zinc-900/30 border border-zinc-800/50 rounded-3xl overflow-hidden hover:border-zinc-700 transition-all flex flex-col">
                   <div className="aspect-square bg-zinc-950 relative border-b border-zinc-800/50">
                     {concept.isGeneratingImage ? (
-                      <div className="absolute inset-0 flex flex-col items-center justify-center text-zinc-500">
-                        <Loader2 className="w-8 h-8 animate-spin mb-3" />
-                        <span className="text-sm font-medium">Creando diseño...</span>
+                      <div className="absolute inset-0 flex flex-col items-center justify-center text-zinc-500 bg-zinc-900/50">
+                        <div className="absolute inset-0 bg-zinc-800/20 animate-pulse"></div>
+                        <Loader2 className="w-8 h-8 animate-spin mb-3 relative z-10" />
+                        <span className="text-sm font-medium relative z-10">Creando diseño...</span>
                       </div>
                     ) : concept.imageUrl ? (
                       <img src={concept.imageUrl} alt={concept.title} className="w-full h-full object-cover" />
@@ -594,15 +660,22 @@ export default function App() {
                 </div>
               ))}
             </div>
-          </div>
+          </motion.div>
         )}
 
         {/* Step 3: Photo Upload */}
         {step === 3 && (
-          <div className="max-w-2xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-700">
+          <motion.div 
+            key="step3"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            transition={{ duration: 0.4 }}
+            className="max-w-2xl mx-auto"
+          >
             <div className="flex items-center gap-4 mb-8">
-              <button onClick={() => setStep(2)} className="text-zinc-500 hover:text-zinc-300 transition-colors">
-                ← Volver
+              <button onClick={() => setStep(2)} className="flex items-center gap-2 text-sm font-medium text-zinc-400 hover:text-zinc-100 bg-zinc-900/50 hover:bg-zinc-800 px-4 py-2 rounded-full border border-zinc-800/50 transition-all">
+                <ArrowLeft className="w-4 h-4" /> Volver
               </button>
               <h1 className="text-4xl font-light tracking-tight">Tu lienzo.</h1>
             </div>
@@ -641,12 +714,19 @@ export default function App() {
                 </label>
               </div>
             )}
-          </div>
+          </motion.div>
         )}
 
         {/* Step 4: Pro Studio */}
         {step === 4 && (
-          <div className="max-w-6xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-700">
+          <motion.div 
+            key="step4"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            transition={{ duration: 0.4 }}
+            className="max-w-6xl mx-auto"
+          >
             <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
               <div>
                 <h1 className="text-4xl font-light tracking-tight mb-2">Estudio Pro</h1>
@@ -654,9 +734,9 @@ export default function App() {
               </div>
               <button 
                 onClick={() => setStep(3)}
-                className="text-sm text-zinc-500 hover:text-zinc-300 transition-colors self-start md:self-auto"
+                className="flex items-center gap-2 text-sm font-medium text-zinc-400 hover:text-zinc-100 bg-zinc-900/50 hover:bg-zinc-800 px-4 py-2 rounded-full border border-zinc-800/50 transition-all self-start md:self-auto"
               >
-                ← Cambiar foto
+                <ArrowLeft className="w-4 h-4" /> Cambiar foto
               </button>
             </div>
 
@@ -867,12 +947,19 @@ export default function App() {
                 </div>
               </div>
             </div>
-          </div>
+          </motion.div>
         )}
 
         {/* Step 5: Final AI Result */}
         {step === 5 && (
-          <div className="max-w-4xl mx-auto">
+          <motion.div 
+            key="step5"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            transition={{ duration: 0.4 }}
+            className="max-w-4xl mx-auto"
+          >
             <div className="flex flex-col md:flex-row md:items-center justify-between mb-10 gap-4">
               <div>
                 <h1 className="text-4xl font-light tracking-tight mb-2">Resultado Final</h1>
@@ -880,18 +967,19 @@ export default function App() {
               </div>
               <button 
                 onClick={() => setStep(4)}
-                className="text-sm text-zinc-500 hover:text-zinc-300 transition-colors self-start md:self-auto"
+                className="flex items-center gap-2 text-sm font-medium text-zinc-400 hover:text-zinc-100 bg-zinc-900/50 hover:bg-zinc-800 px-4 py-2 rounded-full border border-zinc-800/50 transition-all self-start md:self-auto"
               >
-                ← Volver al estudio
+                <ArrowLeft className="w-4 h-4" /> Volver al estudio
               </button>
             </div>
 
-            <div className="bg-zinc-900/30 border border-zinc-800/50 rounded-3xl p-2 md:p-6">
+            <div className="bg-zinc-900/30 border border-zinc-800/50 rounded-3xl p-2 md:p-6 relative overflow-hidden">
               {isGeneratingFinal ? (
-                <div className="aspect-[3/4] md:aspect-video rounded-2xl bg-zinc-950 flex flex-col items-center justify-center text-zinc-400 border border-zinc-800/50">
-                  <Loader2 className="w-10 h-10 animate-spin mb-4 text-zinc-100" />
-                  <p className="font-medium text-zinc-100">Procesando realismo y física...</p>
-                  <p className="text-sm mt-2 text-zinc-500">Añadiendo textura de piel y ajustando iluminación</p>
+                <div className="aspect-[3/4] md:aspect-video rounded-2xl bg-zinc-950 flex flex-col items-center justify-center text-zinc-400 border border-zinc-800/50 relative overflow-hidden">
+                  <div className="absolute inset-0 bg-zinc-100 blur-3xl opacity-5 animate-pulse rounded-full scale-150"></div>
+                  <Loader2 className="w-12 h-12 animate-spin mb-6 text-zinc-100 relative z-10" />
+                  <p className="font-medium text-zinc-100 text-lg relative z-10">Procesando realismo y física...</p>
+                  <p className="text-sm mt-2 text-zinc-500 relative z-10">Añadiendo textura de piel y ajustando iluminación</p>
                 </div>
               ) : finalTryOnImage ? (
                 <div className="aspect-[3/4] md:aspect-video rounded-2xl overflow-hidden bg-zinc-950 border border-zinc-800/50 relative group">
@@ -945,12 +1033,19 @@ export default function App() {
                 </button>
               </div>
             )}
-          </div>
+          </motion.div>
         )}
 
         {/* Step 6: Booking */}
         {step === 6 && (
-          <div className="max-w-5xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-700">
+          <motion.div 
+            key="step6"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            transition={{ duration: 0.4 }}
+            className="max-w-5xl mx-auto"
+          >
             <div className="flex flex-col md:flex-row md:items-center justify-between mb-10 gap-4">
               <div>
                 <h1 className="text-4xl font-light tracking-tight mb-2">Reserva tu cita.</h1>
@@ -958,9 +1053,9 @@ export default function App() {
               </div>
               <button 
                 onClick={() => setStep(5)}
-                className="text-sm text-zinc-500 hover:text-zinc-300 transition-colors self-start md:self-auto"
+                className="flex items-center gap-2 text-sm font-medium text-zinc-400 hover:text-zinc-100 bg-zinc-900/50 hover:bg-zinc-800 px-4 py-2 rounded-full border border-zinc-800/50 transition-all self-start md:self-auto"
               >
-                ← Volver al resultado
+                <ArrowLeft className="w-4 h-4" /> Volver al resultado
               </button>
             </div>
 
@@ -972,8 +1067,9 @@ export default function App() {
                 title="Agendar Sesión"
               ></iframe>
             </div>
-          </div>
+          </motion.div>
         )}
+        </AnimatePresence>
       </main>
     </div>
   );
