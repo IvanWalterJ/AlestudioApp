@@ -15,6 +15,40 @@ type StudioState = {
   strokes: Stroke[];
 };
 
+const LoadingInkAnimation = ({ label, subLabel }: { label: string, subLabel?: string }) => (
+  <div className="flex flex-col items-center justify-center gap-6 py-8">
+    <div className="relative w-24 h-24">
+      <svg className="absolute inset-0 w-full h-full drop-shadow-2xl" viewBox="0 0 100 100">
+        <defs>
+          <filter id="ink-blur">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="4" result="blur" />
+            <feColorMatrix in="blur" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 19 -9" result="goo" />
+          </filter>
+        </defs>
+        <g filter="url(#ink-blur)" className="text-zinc-400">
+          <motion.circle cx="50" cy="50" r="18" fill="currentColor"
+            animate={{ scale: [1, 1.4, 0.9, 1.3, 1], y: [0, -12, 8, -10, 0] }}
+            transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+          />
+          <motion.circle cx="50" cy="50" r="14" fill="currentColor"
+            animate={{ scale: [1, 1.8, 0.6, 1.4, 1], x: [0, 15, -12, 10, 0], y: [0, -18, 6, -8, 0] }}
+            transition={{ duration: 2.5, repeat: Infinity, ease: "easeInOut" }}
+          />
+          <motion.circle cx="50" cy="50" r="10" fill="currentColor"
+            animate={{ scale: [0.6, 1.5, 2, 0.8, 0.6], x: [0, -15, 8, -12, 0], y: [0, 15, -20, 12, 0] }}
+            transition={{ duration: 3.5, repeat: Infinity, ease: "easeInOut" }}
+          />
+        </g>
+      </svg>
+      <Loader2 className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 text-zinc-100 animate-spin z-10" />
+    </div>
+    <div className="text-center">
+      <p className="font-medium text-zinc-100 text-lg tracking-wide">{label}</p>
+      {subLabel && <p className="text-sm mt-2 text-zinc-500">{subLabel}</p>}
+    </div>
+  </div>
+);
+
 export default function App() {
   const [step, setStep] = useState<1 | 2 | 3 | 4 | 5 | 6>(1);
   const [formData, setFormData] = useState<TattooFormData>({
@@ -26,7 +60,7 @@ export default function App() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [concepts, setConcepts] = useState<TattooConcept[]>([]);
   const [selectedConcept, setSelectedConcept] = useState<TattooConcept | null>(null);
-  
+
   // Try-On State
   const [bodyImage, setBodyImage] = useState<string | null>(null);
   const [isCameraOpen, setIsCameraOpen] = useState(false);
@@ -41,13 +75,22 @@ export default function App() {
   const [tattooRotation, setTattooRotation] = useState(0);
   const [tattooOpacity, setTattooOpacity] = useState(1.0);
   const [eraserSize, setEraserSize] = useState(25);
-  
+
   const [eraserStrokes, setEraserStrokes] = useState<Stroke[]>([]);
   const currentStroke = useRef<Stroke>([]);
   const isDragging = useRef(false);
   const isErasing = useRef(false);
   const dragStart = useRef({ x: 0, y: 0 });
+
+  // Touch Gesture Refs
+  const pointers = useRef<Map<number, Point>>(new Map());
+  const initialPinchDist = useRef<number | null>(null);
+  const initialPinchScale = useRef<number | null>(null);
+  const initialPinchAngle = useRef<number | null>(null);
+  const initialPinchRotation = useRef<number | null>(null);
+
   const tattooImageRef = useRef<HTMLImageElement | null>(null);
+  const [tattooImageLoaded, setTattooImageLoaded] = useState(false);
 
   // History State
   const [history, setHistory] = useState<StudioState[]>([]);
@@ -81,13 +124,13 @@ export default function App() {
       };
       setHistory([initialState]);
       setHistoryIndex(0);
-      
+
       setTattooPos(initialState.pos);
       setTattooScale(initialState.scale);
       setTattooRotation(initialState.rotation);
       setTattooOpacity(initialState.opacity);
       setEraserStrokes(initialState.strokes);
-      
+
       currentStateRef.current = initialState;
     }
   }, [step, selectedConcept]);
@@ -137,22 +180,22 @@ export default function App() {
   const [finalTryOnImage, setFinalTryOnImage] = useState<string | null>(null);
 
   const generateImagesForConcepts = async (generatedConcepts: TattooConcept[]) => {
-    const conceptsWithLoading = generatedConcepts.map(c => ({ 
-      ...c, 
-      imageUrl: undefined, 
-      isGeneratingImage: true 
+    const conceptsWithLoading = generatedConcepts.map(c => ({
+      ...c,
+      imageUrl: undefined,
+      isGeneratingImage: true
     }));
     setConcepts(conceptsWithLoading);
 
     for (let i = 0; i < generatedConcepts.length; i++) {
       try {
         const imageUrl = await generateTattooImage(generatedConcepts[i].technicalPrompt, formData.style);
-        setConcepts(prev => prev.map((c, index) => 
+        setConcepts(prev => prev.map((c, index) =>
           index === i ? { ...c, imageUrl, isGeneratingImage: false } : c
         ));
       } catch (error) {
         console.error(`Error generating image for concept ${i}:`, error);
-        setConcepts(prev => prev.map((c, index) => 
+        setConcepts(prev => prev.map((c, index) =>
           index === i ? { ...c, isGeneratingImage: false } : c
         ));
       }
@@ -180,19 +223,19 @@ export default function App() {
     const concept = concepts[conceptIndex];
     if (!concept) return;
 
-    setConcepts(prev => prev.map((c, i) => 
+    setConcepts(prev => prev.map((c, i) =>
       i === conceptIndex ? { ...c, isGeneratingImage: true } : c
     ));
 
     try {
       const imageUrl = await generateTattooImage(concept.technicalPrompt, formData.style);
-      setConcepts(prev => prev.map((c, i) => 
+      setConcepts(prev => prev.map((c, i) =>
         i === conceptIndex ? { ...c, imageUrl, isGeneratingImage: false } : c
       ));
     } catch (error) {
       console.error(error);
       alert("Error al regenerar el diseño.");
-      setConcepts(prev => prev.map((c, i) => 
+      setConcepts(prev => prev.map((c, i) =>
         i === conceptIndex ? { ...c, isGeneratingImage: false } : c
       ));
     }
@@ -233,7 +276,7 @@ export default function App() {
       if (ctx) {
         ctx.drawImage(videoRef.current, 0, 0);
         setBodyImage(canvas.toDataURL('image/jpeg'));
-        
+
         const stream = videoRef.current.srcObject as MediaStream;
         stream?.getTracks().forEach(track => track.stop());
         setIsCameraOpen(false);
@@ -246,12 +289,13 @@ export default function App() {
 
   useEffect(() => {
     if (selectedConcept?.imageUrl && step === 4) {
+      setTattooImageLoaded(false);
       const img = new Image();
       img.crossOrigin = "anonymous";
       img.src = selectedConcept.imageUrl;
       img.onload = () => {
         tattooImageRef.current = img;
-        drawCanvas();
+        setTattooImageLoaded(true);
       };
     }
   }, [selectedConcept?.imageUrl, step]);
@@ -270,7 +314,7 @@ export default function App() {
 
   useEffect(() => {
     drawCanvas();
-  }, [tattooPos, tattooScale, tattooRotation, tattooOpacity, eraserStrokes, bodyImage, step]);
+  }, [tattooPos, tattooScale, tattooRotation, tattooOpacity, eraserStrokes, bodyImage, step, tattooImageLoaded]);
 
   const drawCanvas = () => {
     const canvas = canvasRef.current;
@@ -316,7 +360,7 @@ export default function App() {
       ctx.lineJoin = 'round';
       ctx.lineWidth = eraserSize;
       ctx.strokeStyle = 'rgba(0,0,0,1)';
-      
+
       eraserStrokes.forEach(drawStroke);
       if (currentStroke.current.length > 0) {
         drawStroke(currentStroke.current);
@@ -339,8 +383,21 @@ export default function App() {
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     e.currentTarget.setPointerCapture(e.pointerId);
     if (studioMode === 'move') {
-      isDragging.current = true;
-      dragStart.current = { x: e.clientX - tattooPos.x, y: e.clientY - tattooPos.y };
+      pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+      if (pointers.current.size === 1) {
+        isDragging.current = true;
+        dragStart.current = { x: e.clientX - tattooPos.x, y: e.clientY - tattooPos.y };
+      } else if (pointers.current.size === 2) {
+        isDragging.current = false;
+        const pts = Array.from(pointers.current.values()) as Point[];
+        const dx = pts[0].x - pts[1].x;
+        const dy = pts[0].y - pts[1].y;
+        initialPinchDist.current = Math.hypot(dx, dy);
+        initialPinchScale.current = tattooScale;
+        initialPinchAngle.current = Math.atan2(dy, dx) * 180 / Math.PI;
+        initialPinchRotation.current = tattooRotation;
+      }
     } else {
       isErasing.current = true;
       currentStroke.current = [getCanvasPoint(e)];
@@ -349,8 +406,32 @@ export default function App() {
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (studioMode === 'move' && isDragging.current) {
-      setTattooPos({ x: e.clientX - dragStart.current.x, y: e.clientY - dragStart.current.y });
+    if (studioMode === 'move') {
+      if (pointers.current.has(e.pointerId)) {
+        pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      }
+
+      if (pointers.current.size === 1 && isDragging.current) {
+        setTattooPos({ x: e.clientX - dragStart.current.x, y: e.clientY - dragStart.current.y });
+      } else if (pointers.current.size === 2 && initialPinchDist.current !== null && initialPinchScale.current !== null && initialPinchAngle.current !== null && initialPinchRotation.current !== null) {
+        const pts = Array.from(pointers.current.values()) as Point[];
+        const dx = pts[0].x - pts[1].x;
+        const dy = pts[0].y - pts[1].y;
+        const dist = Math.hypot(dx, dy);
+        const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+
+        const scaleDiff = dist / initialPinchDist.current;
+        const newScale = Math.max(0.1, Math.min(5, initialPinchScale.current * scaleDiff));
+
+        let angleDiff = angle - initialPinchAngle.current;
+        if (angleDiff > 180) angleDiff -= 360;
+        if (angleDiff < -180) angleDiff += 360;
+
+        let newRotation = initialPinchRotation.current + angleDiff;
+
+        setTattooScale(newScale);
+        setTattooRotation(newRotation);
+      }
     } else if (studioMode === 'erase' && isErasing.current) {
       currentStroke.current.push(getCanvasPoint(e));
       drawCanvas();
@@ -360,9 +441,22 @@ export default function App() {
   const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
     e.currentTarget.releasePointerCapture(e.pointerId);
     if (studioMode === 'move') {
-      if (isDragging.current) {
-        isDragging.current = false;
-        saveStateToHistory({ pos: { x: e.clientX - dragStart.current.x, y: e.clientY - dragStart.current.y } });
+      pointers.current.delete(e.pointerId);
+
+      if (pointers.current.size === 0) {
+        if (isDragging.current || initialPinchDist.current !== null) {
+          isDragging.current = false;
+          initialPinchDist.current = null;
+          initialPinchScale.current = null;
+          initialPinchAngle.current = null;
+          initialPinchRotation.current = null;
+          saveStateToHistory({ pos: tattooPos, scale: tattooScale, rotation: tattooRotation });
+        }
+      } else if (pointers.current.size === 1) {
+        const remainingPtr = (Array.from(pointers.current.values()) as Point[])[0];
+        isDragging.current = true;
+        dragStart.current = { x: remainingPtr.x - tattooPos.x, y: remainingPtr.y - tattooPos.y };
+        initialPinchDist.current = null;
       }
     } else if (studioMode === 'erase' && isErasing.current) {
       isErasing.current = false;
@@ -394,7 +488,7 @@ export default function App() {
     const scale = Math.max(exportCanvas.width / img.width, exportCanvas.height / img.height);
     const x = (exportCanvas.width / 2) - (img.width / 2) * scale;
     const y = (exportCanvas.height / 2) - (img.height / 2) * scale;
-    
+
     // 1. Base Body
     ctx.drawImage(img, x, y, img.width * scale, img.height * scale);
 
@@ -482,7 +576,7 @@ export default function App() {
         <AnimatePresence mode="wait">
           {/* Step 1: Brief */}
           {step === 1 && (
-            <motion.div 
+            <motion.div
               key="step1"
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
@@ -491,584 +585,587 @@ export default function App() {
               className="max-w-2xl mx-auto"
             >
               <h1 className="text-5xl font-light tracking-tight mb-4">Crea tu diseño.</h1>
-            <p className="text-zinc-400 text-lg mb-12 leading-relaxed">Describe tu idea, elige un estilo y deja que la IA genere conceptos únicos para tu próximo tatuaje.</p>
-            
-            <form onSubmit={handleGenerateConcepts} className="space-y-8 bg-zinc-900/30 p-8 rounded-3xl border border-zinc-800/50">
-              <div className="space-y-3">
-                <label className="text-sm font-medium text-zinc-300 uppercase tracking-wider">Estilo del Tatuaje</label>
-                <select 
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-4 text-zinc-100 focus:ring-2 focus:ring-zinc-700 focus:border-transparent outline-none transition-all appearance-none"
-                  value={formData.style}
-                  onChange={e => setFormData({...formData, style: e.target.value})}
-                >
-                  <option>Blackwork</option>
-                  <option>Tradicional (Old School)</option>
-                  <option>Neotradicional</option>
-                  <option>Realismo (Blanco y Negro)</option>
-                  <option>Realismo (Color)</option>
-                  <option>Micro-realismo</option>
-                  <option>Minimalista / Fineline</option>
-                  <option>Japonés (Irezumi)</option>
-                  <option>Acuarela (Watercolor)</option>
-                  <option>Geométrico</option>
-                  <option>Dotwork (Puntillismo)</option>
-                  <option>Tribal / Polinesio</option>
-                  <option>Maorí</option>
-                  <option>Trash Polka</option>
-                  <option>Ignorant Style</option>
-                  <option>Black and Grey</option>
-                  <option>Biomecánico</option>
-                  <option>Lettering / Caligrafía</option>
-                  <option>Anime / Otaku</option>
-                  <option>Sketch (Boceto)</option>
-                  <option>Surrealismo</option>
-                  <option>Chicano</option>
-                  <option>Ornamental / Mehndi</option>
-                  <option>Handpoke</option>
-                  <option>New School</option>
-                  <option>Celta</option>
-                  <option>Abstracto</option>
-                  <option>Glitch</option>
-                  <option>Cyberpunk</option>
-                </select>
-              </div>
+              <p className="text-zinc-400 text-lg mb-12 leading-relaxed">Describe tu idea, elige un estilo y deja que la IA genere conceptos únicos para tu próximo tatuaje.</p>
 
-              <div className="space-y-3">
-                <label className="text-sm font-medium text-zinc-300 uppercase tracking-wider">Historia o Significado</label>
-                <textarea 
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-4 text-zinc-100 focus:ring-2 focus:ring-zinc-700 focus:border-transparent outline-none transition-all min-h-[120px] resize-none"
-                  placeholder="Ej: Quiero representar la superación de un momento difícil, como un fénix o algo relacionado con el renacer..."
-                  value={formData.meaning}
-                  onChange={e => setFormData({...formData, meaning: e.target.value})}
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-6">
+              <form onSubmit={handleGenerateConcepts} className="space-y-8 bg-zinc-900/30 p-8 rounded-3xl border border-zinc-800/50">
                 <div className="space-y-3">
-                  <label className="text-sm font-medium text-zinc-300 uppercase tracking-wider">Parte del Cuerpo</label>
-                  <input 
-                    type="text"
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-4 text-zinc-100 focus:ring-2 focus:ring-zinc-700 focus:border-transparent outline-none transition-all"
-                    placeholder="Ej: Antebrazo"
-                    value={formData.bodyPart}
-                    onChange={e => setFormData({...formData, bodyPart: e.target.value})}
-                  />
-                </div>
-                <div className="space-y-3">
-                  <label className="text-sm font-medium text-zinc-300 uppercase tracking-wider">Tamaño</label>
-                  <select 
+                  <label className="text-sm font-medium text-zinc-300 uppercase tracking-wider">Estilo del Tatuaje</label>
+                  <select
                     className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-4 text-zinc-100 focus:ring-2 focus:ring-zinc-700 focus:border-transparent outline-none transition-all appearance-none"
-                    value={formData.size}
-                    onChange={e => setFormData({...formData, size: e.target.value})}
+                    value={formData.style}
+                    onChange={e => setFormData({ ...formData, style: e.target.value })}
                   >
-                    <option>Pequeño (1-5cm)</option>
-                    <option>Mediano (10-15cm)</option>
-                    <option>Grande (20cm+)</option>
-                    <option>Manga completa</option>
+                    <option>Blackwork</option>
+                    <option>Tradicional (Old School)</option>
+                    <option>Neotradicional</option>
+                    <option>Realismo (Blanco y Negro)</option>
+                    <option>Realismo (Color)</option>
+                    <option>Micro-realismo</option>
+                    <option>Minimalista / Fineline</option>
+                    <option>Japonés (Irezumi)</option>
+                    <option>Acuarela (Watercolor)</option>
+                    <option>Geométrico</option>
+                    <option>Dotwork (Puntillismo)</option>
+                    <option>Tribal / Polinesio</option>
+                    <option>Maorí</option>
+                    <option>Trash Polka</option>
+                    <option>Ignorant Style</option>
+                    <option>Black and Grey</option>
+                    <option>Biomecánico</option>
+                    <option>Lettering / Caligrafía</option>
+                    <option>Anime / Otaku</option>
+                    <option>Sketch (Boceto)</option>
+                    <option>Surrealismo</option>
+                    <option>Chicano</option>
+                    <option>Ornamental / Mehndi</option>
+                    <option>Handpoke</option>
+                    <option>New School</option>
+                    <option>Celta</option>
+                    <option>Abstracto</option>
+                    <option>Glitch</option>
+                    <option>Cyberpunk</option>
                   </select>
                 </div>
-              </div>
 
-              <button 
-                type="submit"
-                disabled={!formData.meaning || isGenerating}
-                className="w-full relative overflow-hidden bg-zinc-100 text-zinc-950 font-medium rounded-xl p-4 flex items-center justify-center gap-2 hover:bg-white transition-all disabled:opacity-80 disabled:cursor-not-allowed mt-4 group"
-              >
-                {isGenerating ? (
-                  <span className="flex items-center gap-2 animate-pulse">
-                    <Loader2 className="w-5 h-5 animate-spin" /> Creando magia...
-                  </span>
-                ) : (
-                  <><Sparkles className="w-5 h-5" /> Generar Ideas</>
-                )}
-              </button>
-            </form>
+                <div className="space-y-3">
+                  <label className="text-sm font-medium text-zinc-300 uppercase tracking-wider">Historia o Significado</label>
+                  <textarea
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-4 text-zinc-100 focus:ring-2 focus:ring-zinc-700 focus:border-transparent outline-none transition-all min-h-[120px] resize-none"
+                    placeholder="Ej: Quiero representar la superación de un momento difícil, como un fénix o algo relacionado con el renacer..."
+                    value={formData.meaning}
+                    onChange={e => setFormData({ ...formData, meaning: e.target.value })}
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-6">
+                  <div className="space-y-3">
+                    <label className="text-sm font-medium text-zinc-300 uppercase tracking-wider">Parte del Cuerpo</label>
+                    <input
+                      type="text"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-4 text-zinc-100 focus:ring-2 focus:ring-zinc-700 focus:border-transparent outline-none transition-all"
+                      placeholder="Ej: Antebrazo"
+                      value={formData.bodyPart}
+                      onChange={e => setFormData({ ...formData, bodyPart: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-3">
+                    <label className="text-sm font-medium text-zinc-300 uppercase tracking-wider">Tamaño</label>
+                    <select
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-4 text-zinc-100 focus:ring-2 focus:ring-zinc-700 focus:border-transparent outline-none transition-all appearance-none"
+                      value={formData.size}
+                      onChange={e => setFormData({ ...formData, size: e.target.value })}
+                    >
+                      <option>Pequeño (1-5cm)</option>
+                      <option>Mediano (10-15cm)</option>
+                      <option>Grande (20cm+)</option>
+                      <option>Manga completa</option>
+                    </select>
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={!formData.meaning || isGenerating}
+                  className="w-full relative overflow-hidden bg-zinc-100 text-zinc-950 font-medium rounded-xl p-4 flex items-center justify-center gap-2 hover:bg-white transition-all disabled:opacity-80 disabled:cursor-not-allowed mt-4 group"
+                >
+                  {isGenerating ? (
+                    <span className="flex items-center gap-2 animate-pulse">
+                      <Loader2 className="w-5 h-5 animate-spin" /> Creando magia...
+                    </span>
+                  ) : (
+                    <><Sparkles className="w-5 h-5" /> Generar Ideas</>
+                  )}
+                </button>
+              </form>
             </motion.div>
-        )}
+          )}
 
           {/* Step 2: Concepts & Designs */}
           {step === 2 && (
-            <motion.div 
+            <motion.div
               key="step2"
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -20 }}
               transition={{ duration: 0.4 }}
             >
-              <div className="flex flex-col md:flex-row md:items-end justify-between mb-12 gap-6">
-              <div>
-                <h1 className="text-4xl font-light tracking-tight mb-2">Elige tu diseño.</h1>
-                <p className="text-zinc-400">Selecciona el concepto que más te guste para probarlo en tu piel.</p>
-              </div>
-              <button 
-                onClick={handleGenerateConcepts}
-                disabled={isGenerating}
-                className="flex items-center gap-2 text-sm font-medium text-zinc-400 hover:text-zinc-100 transition-colors bg-zinc-900/50 px-4 py-2 rounded-lg border border-zinc-800"
-              >
-                <RefreshCw className={`w-4 h-4 ${isGenerating ? 'animate-spin' : ''}`} />
-                Regenerar Ideas
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              {concepts.map((concept, idx) => (
-                <div key={idx} className="group bg-zinc-900/30 border border-zinc-800/50 rounded-3xl overflow-hidden hover:border-zinc-700 transition-all flex flex-col">
-                  <div className="aspect-square bg-zinc-950 relative border-b border-zinc-800/50">
-                    {concept.isGeneratingImage ? (
-                      <div className="absolute inset-0 flex flex-col items-center justify-center text-zinc-500 bg-zinc-900/50">
-                        <div className="absolute inset-0 bg-zinc-800/20 animate-pulse"></div>
-                        <Loader2 className="w-8 h-8 animate-spin mb-3 relative z-10" />
-                        <span className="text-sm font-medium relative z-10">Creando diseño...</span>
-                      </div>
-                    ) : concept.imageUrl ? (
-                      <img src={concept.imageUrl} alt={concept.title} className="w-full h-full object-cover" />
-                    ) : (
-                      <div className="absolute inset-0 flex items-center justify-center text-zinc-600">
-                        <span className="text-sm">Error al generar imagen</span>
-                      </div>
-                    )}
-                    
-                    {/* Style Regeneration Overlay */}
-                    {!concept.isGeneratingImage && concept.imageUrl && (
-                      <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button 
-                          onClick={() => handleRegenerateStyle(idx)}
-                          className="bg-zinc-950/80 backdrop-blur-md text-zinc-300 hover:text-white text-xs font-medium px-3 py-2 rounded-lg border border-zinc-800 flex items-center gap-2"
-                        >
-                          <RefreshCw className="w-3 h-3" />
-                          Probar otro estilo
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                  
-                  <div className="p-6 flex flex-col flex-grow">
-                    <h3 className="text-xl font-medium mb-3">{concept.title}</h3>
-                    <p className="text-zinc-400 text-sm leading-relaxed mb-6 flex-grow">{concept.narrative}</p>
-                    
-                    <button 
-                      onClick={() => {
-                        setSelectedConcept(concept);
-                        setStep(3);
-                      }}
-                      disabled={!concept.imageUrl || concept.isGeneratingImage}
-                      className="w-full bg-zinc-800 text-zinc-100 font-medium rounded-xl p-3 flex items-center justify-center gap-2 hover:bg-zinc-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed mt-auto"
+              {concepts.length === 0 ? (
+                <div className="min-h-[60vh] flex items-center justify-center">
+                  <LoadingInkAnimation label="Generando Ideas..." subLabel="Interpretando tu visión y creando conceptos únicos" />
+                </div>
+              ) : (
+                <>
+                  <div className="flex flex-col md:flex-row md:items-end justify-between mb-12 gap-6">
+                    <div>
+                      <h1 className="text-4xl font-light tracking-tight mb-2">Elige tu diseño.</h1>
+                      <p className="text-zinc-400">Selecciona el concepto que más te guste para probarlo en tu piel.</p>
+                    </div>
+                    <button
+                      onClick={handleGenerateConcepts}
+                      disabled={isGenerating}
+                      className="flex items-center gap-2 text-sm font-medium text-zinc-400 hover:text-zinc-100 transition-colors bg-zinc-900/50 px-4 py-2 rounded-lg border border-zinc-800"
                     >
-                      Probar en mi piel <ArrowRight className="w-4 h-4" />
+                      <RefreshCw className={`w-4 h-4 ${isGenerating ? 'animate-spin' : ''}`} />
+                      Regenerar Ideas
                     </button>
                   </div>
-                </div>
-              ))}
-            </div>
-          </motion.div>
-        )}
 
-        {/* Step 3: Photo Upload */}
-        {step === 3 && (
-          <motion.div 
-            key="step3"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            transition={{ duration: 0.4 }}
-            className="max-w-2xl mx-auto"
-          >
-            <div className="flex items-center gap-4 mb-8">
-              <button onClick={() => setStep(2)} className="flex items-center gap-2 text-sm font-medium text-zinc-400 hover:text-zinc-100 bg-zinc-900/50 hover:bg-zinc-800 px-4 py-2 rounded-full border border-zinc-800/50 transition-all">
-                <ArrowLeft className="w-4 h-4" /> Volver
-              </button>
-              <h1 className="text-4xl font-light tracking-tight">Tu lienzo.</h1>
-            </div>
-            <p className="text-zinc-400 text-lg mb-8">Sube una foto de tu {formData.bodyPart.toLowerCase()} para probar el diseño.</p>
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                    {concepts.map((concept, idx) => (
+                      <div key={idx} className="group bg-zinc-900/30 border border-zinc-800/50 rounded-3xl overflow-hidden hover:border-zinc-700 transition-all flex flex-col">
+                        <div className="aspect-square bg-zinc-950 relative border-b border-zinc-800/50">
+                          {concept.isGeneratingImage ? (
+                            <div className="absolute inset-0 flex flex-col items-center justify-center text-zinc-500 bg-zinc-900/50">
+                              <LoadingInkAnimation label="Creando diseño..." />
+                            </div>
+                          ) : concept.imageUrl ? (
+                            <img src={concept.imageUrl} alt={concept.title} className="w-full h-full object-cover" />
+                          ) : (
+                            <div className="absolute inset-0 flex items-center justify-center text-zinc-600">
+                              <span className="text-sm">Error al generar imagen</span>
+                            </div>
+                          )}
 
-            {isCameraOpen ? (
-              <div className="bg-zinc-900/30 border border-zinc-800/50 rounded-3xl p-4 overflow-hidden relative">
-                <video ref={videoRef} autoPlay playsInline className="w-full rounded-2xl bg-zinc-950" />
-                <div className="absolute bottom-8 left-0 right-0 flex justify-center gap-4">
-                  <button onClick={takePhoto} className="bg-zinc-100 text-zinc-950 rounded-full w-16 h-16 flex items-center justify-center hover:bg-white transition-colors">
-                    <Camera className="w-6 h-6" />
-                  </button>
-                  <button onClick={() => setIsCameraOpen(false)} className="bg-zinc-800 text-zinc-100 rounded-full w-16 h-16 flex items-center justify-center hover:bg-zinc-700 transition-colors">
-                    <X className="w-6 h-6" />
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <button 
-                  onClick={startCamera}
-                  className="bg-zinc-900/30 border border-zinc-800/50 rounded-3xl p-12 flex flex-col items-center justify-center gap-4 hover:bg-zinc-900/50 transition-colors group"
-                >
-                  <div className="w-16 h-16 rounded-2xl bg-zinc-800 flex items-center justify-center group-hover:scale-110 transition-transform">
-                    <Camera className="w-8 h-8 text-zinc-400" />
+                          {/* Style Regeneration Overlay */}
+                          {!concept.isGeneratingImage && concept.imageUrl && (
+                            <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <button
+                                onClick={() => handleRegenerateStyle(idx)}
+                                className="bg-zinc-950/80 backdrop-blur-md text-zinc-300 hover:text-white text-xs font-medium px-3 py-2 rounded-lg border border-zinc-800 flex items-center gap-2"
+                              >
+                                <RefreshCw className="w-3 h-3" />
+                                Probar otro estilo
+                              </button>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="p-6 flex flex-col flex-grow">
+                          <h3 className="text-xl font-medium mb-3">{concept.title}</h3>
+                          <p className="text-zinc-400 text-sm leading-relaxed mb-6 flex-grow">{concept.narrative}</p>
+
+                          <button
+                            onClick={() => {
+                              setSelectedConcept(concept);
+                              setStep(3);
+                            }}
+                            disabled={!concept.imageUrl || concept.isGeneratingImage}
+                            className="w-full bg-zinc-800 text-zinc-100 font-medium rounded-xl p-3 flex items-center justify-center gap-2 hover:bg-zinc-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed mt-auto"
+                          >
+                            Probar en mi piel <ArrowRight className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                  <span className="font-medium text-zinc-300">Tomar foto</span>
+                </>
+              )}
+            </motion.div>
+          )}
+
+          {/* Step 3: Photo Upload */}
+          {step === 3 && (
+            <motion.div
+              key="step3"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              transition={{ duration: 0.4 }}
+              className="max-w-2xl mx-auto"
+            >
+              <div className="flex items-center gap-4 mb-8">
+                <button onClick={() => setStep(2)} className="flex items-center gap-2 text-sm font-medium text-zinc-400 hover:text-zinc-100 bg-zinc-900/50 hover:bg-zinc-800 px-4 py-2 rounded-full border border-zinc-800/50 transition-all">
+                  <ArrowLeft className="w-4 h-4" /> Volver
                 </button>
-
-                <label className="bg-zinc-900/30 border border-zinc-800/50 rounded-3xl p-12 flex flex-col items-center justify-center gap-4 hover:bg-zinc-900/50 transition-colors cursor-pointer group">
-                  <div className="w-16 h-16 rounded-2xl bg-zinc-800 flex items-center justify-center group-hover:scale-110 transition-transform">
-                    <Upload className="w-8 h-8 text-zinc-400" />
-                  </div>
-                  <span className="font-medium text-zinc-300">Subir imagen</span>
-                  <input type="file" accept="image/*" className="hidden" onChange={handleFileUpload} />
-                </label>
+                <h1 className="text-4xl font-light tracking-tight">Tu lienzo.</h1>
               </div>
-            )}
-          </motion.div>
-        )}
+              <p className="text-zinc-400 text-lg mb-8">Sube una foto de tu {formData.bodyPart.toLowerCase()} para probar el diseño.</p>
 
-        {/* Step 4: Pro Studio */}
-        {step === 4 && (
-          <motion.div 
-            key="step4"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            transition={{ duration: 0.4 }}
-            className="max-w-6xl mx-auto"
-          >
-            <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
-              <div>
-                <h1 className="text-4xl font-light tracking-tight mb-2">Estudio Pro</h1>
-                <p className="text-zinc-400">Ajusta, borra los excesos y aplica realismo.</p>
-              </div>
-              <button 
-                onClick={() => setStep(3)}
-                className="flex items-center gap-2 text-sm font-medium text-zinc-400 hover:text-zinc-100 bg-zinc-900/50 hover:bg-zinc-800 px-4 py-2 rounded-full border border-zinc-800/50 transition-all self-start md:self-auto"
-              >
-                <ArrowLeft className="w-4 h-4" /> Cambiar foto
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              {/* Canvas Area */}
-              <div className="lg:col-span-2 bg-zinc-900/30 border border-zinc-800/50 rounded-3xl p-2 md:p-6">
-                <div 
-                  ref={containerRef} 
-                  className="relative w-full aspect-[3/4] md:aspect-square lg:aspect-video rounded-2xl overflow-hidden bg-zinc-950 border border-zinc-800/50 shadow-2xl touch-none"
-                >
-                  {/* 1. Base Body Image */}
-                  {bodyImage && (
-                    <img 
-                      src={bodyImage} 
-                      alt="Body" 
-                      className="absolute inset-0 w-full h-full object-cover pointer-events-none"
-                    />
-                  )}
-
-                  {/* 2. Interactive Tattoo Canvas (Multiply) */}
-                  <canvas
-                    ref={canvasRef}
-                    className={`absolute inset-0 w-full h-full mix-blend-multiply ${studioMode === 'move' ? 'cursor-move' : 'cursor-crosshair'}`}
-                    onPointerDown={handlePointerDown}
-                    onPointerMove={handlePointerMove}
-                    onPointerUp={handlePointerUp}
-                    onPointerLeave={handlePointerUp}
-                  />
-
-                  {/* 3. Skin Highlights (Screen) - Adds realism over the ink */}
-                  {bodyImage && (
-                    <img 
-                      src={bodyImage} 
-                      alt="Highlights" 
-                      className="absolute inset-0 w-full h-full object-cover mix-blend-screen opacity-15 pointer-events-none"
-                    />
-                  )}
-
-                  {/* Instruction Overlay */}
-                  <div className="absolute bottom-4 left-0 right-0 flex justify-center pointer-events-none">
-                    <div className="bg-zinc-950/80 backdrop-blur-md text-zinc-300 text-xs px-4 py-2 rounded-full border border-zinc-800 shadow-xl">
-                      {studioMode === 'move' ? 'Arrastra para mover el tatuaje' : 'Dibuja sobre el tatuaje para borrar los excesos'}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Controls Sidebar */}
-              <div className="flex flex-col gap-6">
-                {/* Mode Switcher & History */}
-                <div className="flex items-center gap-2">
-                  <div className="bg-zinc-900/30 border border-zinc-800/50 rounded-2xl p-2 flex gap-2 flex-1">
-                    <button 
-                      onClick={() => setStudioMode('move')}
-                      className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-medium transition-colors ${studioMode === 'move' ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`}
-                    >
-                      <Move className="w-4 h-4" /> Mover
+              {isCameraOpen ? (
+                <div className="bg-zinc-900/30 border border-zinc-800/50 rounded-3xl p-4 overflow-hidden relative">
+                  <video ref={videoRef} autoPlay playsInline className="w-full rounded-2xl bg-zinc-950" />
+                  <div className="absolute bottom-8 left-0 right-0 flex justify-center gap-4">
+                    <button onClick={takePhoto} className="bg-zinc-100 text-zinc-950 rounded-full w-16 h-16 flex items-center justify-center hover:bg-white transition-colors">
+                      <Camera className="w-6 h-6" />
                     </button>
-                    <button 
-                      onClick={() => setStudioMode('erase')}
-                      className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-medium transition-colors ${studioMode === 'erase' ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`}
-                    >
-                      <Eraser className="w-4 h-4" /> Borrar
-                    </button>
-                  </div>
-                  
-                  <div className="flex items-center gap-2 bg-zinc-900/30 border border-zinc-800/50 rounded-2xl p-2">
-                    <button 
-                      onClick={handleUndo} 
-                      disabled={historyIndex <= 0}
-                      className="p-3 bg-zinc-800 text-zinc-300 rounded-xl hover:bg-zinc-700 disabled:opacity-50 transition-colors"
-                      title="Deshacer"
-                    >
-                      <Undo className="w-4 h-4" />
-                    </button>
-                    <button 
-                      onClick={handleRedo} 
-                      disabled={historyIndex >= history.length - 1}
-                      className="p-3 bg-zinc-800 text-zinc-300 rounded-xl hover:bg-zinc-700 disabled:opacity-50 transition-colors"
-                      title="Rehacer"
-                    >
-                      <Redo className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-
-                <div className="bg-zinc-900/30 border border-zinc-800/50 rounded-2xl p-6">
-                  {studioMode === 'move' ? (
-                    <div className="space-y-8">
-                      <div className="flex items-center gap-3 mb-6">
-                        <SlidersHorizontal className="w-5 h-5 text-zinc-400" />
-                        <h3 className="font-medium text-zinc-100">Ajustes del Tatuaje</h3>
-                      </div>
-
-                      {/* Scale Control */}
-                      <div className="space-y-3">
-                        <div className="flex justify-between text-sm">
-                          <label className="text-zinc-400">Tamaño</label>
-                          <span className="text-zinc-500 font-mono">{Math.round(tattooScale * 100)}%</span>
-                        </div>
-                        <input 
-                          type="range" 
-                          min="0.5" 
-                          max="2" 
-                          step="0.05" 
-                          value={tattooScale}
-                          onChange={(e) => setTattooScale(parseFloat(e.target.value))}
-                          onPointerUp={(e) => saveStateToHistory({ scale: parseFloat(e.currentTarget.value) })}
-                          onKeyUp={(e) => saveStateToHistory({ scale: parseFloat(e.currentTarget.value) })}
-                          className="w-full accent-zinc-100 h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer"
-                        />
-                      </div>
-
-                      {/* Rotation Control */}
-                      <div className="space-y-3">
-                        <div className="flex justify-between text-sm">
-                          <label className="text-zinc-400">Rotación</label>
-                          <span className="text-zinc-500 font-mono">{tattooRotation}°</span>
-                        </div>
-                        <input 
-                          type="range" 
-                          min="-180" 
-                          max="180" 
-                          value={tattooRotation}
-                          onChange={(e) => setTattooRotation(parseInt(e.target.value))}
-                          onPointerUp={(e) => saveStateToHistory({ rotation: parseInt(e.currentTarget.value) })}
-                          onKeyUp={(e) => saveStateToHistory({ rotation: parseInt(e.currentTarget.value) })}
-                          className="w-full accent-zinc-100 h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer"
-                        />
-                      </div>
-
-                      {/* Opacity/Fading Control */}
-                      <div className="space-y-3">
-                        <div className="flex justify-between text-sm">
-                          <label className="text-zinc-400">Intensidad (Tinta Fresca)</label>
-                          <span className="text-zinc-500 font-mono">{Math.round(tattooOpacity * 100)}%</span>
-                        </div>
-                        <input 
-                          type="range" 
-                          min="0.3" 
-                          max="1" 
-                          step="0.05" 
-                          value={tattooOpacity}
-                          onChange={(e) => setTattooOpacity(parseFloat(e.target.value))}
-                          onPointerUp={(e) => saveStateToHistory({ opacity: parseFloat(e.currentTarget.value) })}
-                          onKeyUp={(e) => saveStateToHistory({ opacity: parseFloat(e.currentTarget.value) })}
-                          className="w-full accent-zinc-100 h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer"
-                        />
-                        <p className="text-xs text-zinc-600">Bájalo para simular un tatuaje curado.</p>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="space-y-8">
-                      <div className="flex items-center gap-3 mb-6">
-                        <Eraser className="w-5 h-5 text-zinc-400" />
-                        <h3 className="font-medium text-zinc-100">Borrador Mágico</h3>
-                      </div>
-                      <p className="text-sm text-zinc-400 leading-relaxed">
-                        Pasa el cursor sobre las partes del tatuaje que se salen de tu cuerpo para borrarlas.
-                      </p>
-
-                      <div className="space-y-3">
-                        <div className="flex justify-between text-sm">
-                          <label className="text-zinc-400">Tamaño del pincel</label>
-                        </div>
-                        <input 
-                          type="range" 
-                          min="5" 
-                          max="80" 
-                          value={eraserSize}
-                          onChange={(e) => setEraserSize(parseInt(e.target.value))}
-                          className="w-full accent-zinc-100 h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer"
-                        />
-                      </div>
-
-                      <div className="flex gap-3 pt-4 border-t border-zinc-800/50">
-                        <button 
-                          onClick={() => {
-                            setEraserStrokes([]);
-                            saveStateToHistory({ strokes: [] });
-                          }}
-                          disabled={eraserStrokes.length === 0}
-                          className="w-full flex items-center justify-center gap-2 bg-red-950/30 text-red-400 py-3 rounded-xl text-sm font-medium hover:bg-red-900/40 transition-colors disabled:opacity-50"
-                        >
-                          Limpiar borrados
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <div className="flex flex-col gap-3 mt-auto">
-                  <button 
-                    onClick={handleDownload}
-                    className="w-full bg-zinc-800 text-zinc-100 font-medium rounded-xl p-4 flex items-center justify-center gap-2 hover:bg-zinc-700 transition-colors"
-                  >
-                    <Download className="w-5 h-5" />
-                    Descargar Boceto
-                  </button>
-
-                  <button 
-                    onClick={handleGenerateFinalImage}
-                    className="w-full bg-zinc-100 text-zinc-950 font-medium rounded-xl p-4 flex items-center justify-center gap-2 hover:bg-white transition-colors shadow-2xl"
-                  >
-                    <Sparkles className="w-5 h-5" />
-                    Aplicar Realismo con IA
-                  </button>
-                </div>
-              </div>
-            </div>
-          </motion.div>
-        )}
-
-        {/* Step 5: Final AI Result */}
-        {step === 5 && (
-          <motion.div 
-            key="step5"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            transition={{ duration: 0.4 }}
-            className="max-w-4xl mx-auto"
-          >
-            <div className="flex flex-col md:flex-row md:items-center justify-between mb-10 gap-4">
-              <div>
-                <h1 className="text-4xl font-light tracking-tight mb-2">Resultado Final</h1>
-                <p className="text-zinc-400">Tu diseño adaptado anatómicamente con IA.</p>
-              </div>
-              <button 
-                onClick={() => setStep(4)}
-                className="flex items-center gap-2 text-sm font-medium text-zinc-400 hover:text-zinc-100 bg-zinc-900/50 hover:bg-zinc-800 px-4 py-2 rounded-full border border-zinc-800/50 transition-all self-start md:self-auto"
-              >
-                <ArrowLeft className="w-4 h-4" /> Volver al estudio
-              </button>
-            </div>
-
-            <div className="bg-zinc-900/30 border border-zinc-800/50 rounded-3xl p-2 md:p-6 relative overflow-hidden">
-              {isGeneratingFinal ? (
-                <div className="aspect-[3/4] md:aspect-video rounded-2xl bg-zinc-950 flex flex-col items-center justify-center text-zinc-400 border border-zinc-800/50 relative overflow-hidden">
-                  <div className="absolute inset-0 bg-zinc-100 blur-3xl opacity-5 animate-pulse rounded-full scale-150"></div>
-                  <Loader2 className="w-12 h-12 animate-spin mb-6 text-zinc-100 relative z-10" />
-                  <p className="font-medium text-zinc-100 text-lg relative z-10">Procesando realismo y física...</p>
-                  <p className="text-sm mt-2 text-zinc-500 relative z-10">Añadiendo textura de piel y ajustando iluminación</p>
-                </div>
-              ) : finalTryOnImage ? (
-                <div className="aspect-[3/4] md:aspect-video rounded-2xl overflow-hidden bg-zinc-950 border border-zinc-800/50 relative group">
-                  <img src={finalTryOnImage} alt="Tattoo Try-On Result" className="w-full h-full object-contain" />
-                  <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                    <button 
-                      onClick={() => {
-                        const link = document.createElement('a');
-                        link.download = 'tattoo-ai-result.jpg';
-                        link.href = finalTryOnImage;
-                        link.click();
-                      }}
-                      className="bg-zinc-100 text-zinc-950 px-6 py-3 rounded-xl font-medium flex items-center gap-2 hover:bg-white transition-colors"
-                    >
-                      <Download className="w-5 h-5" />
-                      Descargar Imagen Final
+                    <button onClick={() => setIsCameraOpen(false)} className="bg-zinc-800 text-zinc-100 rounded-full w-16 h-16 flex items-center justify-center hover:bg-zinc-700 transition-colors">
+                      <X className="w-6 h-6" />
                     </button>
                   </div>
                 </div>
               ) : (
-                <div className="aspect-[3/4] md:aspect-video rounded-2xl bg-zinc-950 flex flex-col items-center justify-center text-zinc-400 border border-zinc-800/50">
-                  <p>Error al generar la imagen.</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <button
+                    onClick={startCamera}
+                    className="bg-zinc-900/30 border border-zinc-800/50 rounded-3xl p-12 flex flex-col items-center justify-center gap-4 hover:bg-zinc-900/50 transition-colors group"
+                  >
+                    <div className="w-16 h-16 rounded-2xl bg-zinc-800 flex items-center justify-center group-hover:scale-110 transition-transform">
+                      <Camera className="w-8 h-8 text-zinc-400" />
+                    </div>
+                    <span className="font-medium text-zinc-300">Tomar foto</span>
+                  </button>
+
+                  <label className="bg-zinc-900/30 border border-zinc-800/50 rounded-3xl p-12 flex flex-col items-center justify-center gap-4 hover:bg-zinc-900/50 transition-colors cursor-pointer group">
+                    <div className="w-16 h-16 rounded-2xl bg-zinc-800 flex items-center justify-center group-hover:scale-110 transition-transform">
+                      <Upload className="w-8 h-8 text-zinc-400" />
+                    </div>
+                    <span className="font-medium text-zinc-300">Subir imagen</span>
+                    <input type="file" accept="image/*" className="hidden" onChange={handleFileUpload} />
+                  </label>
                 </div>
               )}
-            </div>
+            </motion.div>
+          )}
 
-            {!isGeneratingFinal && finalTryOnImage && (
-              <div className="mt-12 flex flex-col sm:flex-row justify-center gap-4">
-                <button 
-                  onClick={() => setStep(6)}
-                  className="bg-zinc-100 text-zinc-950 font-medium rounded-xl px-8 py-4 flex items-center justify-center gap-2 hover:bg-white transition-colors"
+          {/* Step 4: Pro Studio */}
+          {step === 4 && (
+            <motion.div
+              key="step4"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              transition={{ duration: 0.4 }}
+              className="max-w-6xl mx-auto"
+            >
+              <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
+                <div>
+                  <h1 className="text-4xl font-light tracking-tight mb-2">Estudio Pro</h1>
+                  <p className="text-zinc-400">Ajusta, borra los excesos y aplica realismo.</p>
+                </div>
+                <button
+                  onClick={() => setStep(3)}
+                  className="flex items-center gap-2 text-sm font-medium text-zinc-400 hover:text-zinc-100 bg-zinc-900/50 hover:bg-zinc-800 px-4 py-2 rounded-full border border-zinc-800/50 transition-all self-start md:self-auto"
                 >
-                  <Calendar className="w-5 h-5" />
-                  Agendar Sesión
-                </button>
-                <button 
-                  onClick={() => {
-                    setStep(1);
-                    setBodyImage(null);
-                    setFinalTryOnImage(null);
-                    setSelectedConcept(null);
-                    setTattooPos({x: 0, y: 0});
-                    setTattooScale(1);
-                    setTattooRotation(0);
-                    setEraserStrokes([]);
-                    setFormData({ ...formData, meaning: '' });
-                  }}
-                  className="bg-zinc-800 text-zinc-100 font-medium rounded-xl px-8 py-4 flex items-center justify-center gap-2 hover:bg-zinc-700 transition-colors"
-                >
-                  Crear otro tatuaje
+                  <ArrowLeft className="w-4 h-4" /> Cambiar foto
                 </button>
               </div>
-            )}
-          </motion.div>
-        )}
 
-        {/* Step 6: Booking */}
-        {step === 6 && (
-          <motion.div 
-            key="step6"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            transition={{ duration: 0.4 }}
-            className="max-w-5xl mx-auto"
-          >
-            <div className="flex flex-col md:flex-row md:items-center justify-between mb-10 gap-4">
-              <div>
-                <h1 className="text-4xl font-light tracking-tight mb-2">Reserva tu cita.</h1>
-                <p className="text-zinc-400">Elige el día y la hora para hacer realidad tu diseño en Al Estilo Estudio.</p>
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                {/* Canvas Area */}
+                <div className="lg:col-span-2 bg-zinc-900/30 border border-zinc-800/50 rounded-3xl p-2 md:p-6">
+                  <div
+                    ref={containerRef}
+                    className="relative w-full aspect-[3/4] md:aspect-square lg:aspect-video rounded-2xl overflow-hidden bg-zinc-950 border border-zinc-800/50 shadow-2xl touch-none"
+                  >
+                    {/* 1. Base Body Image */}
+                    {bodyImage && (
+                      <img
+                        src={bodyImage}
+                        alt="Body"
+                        className="absolute inset-0 w-full h-full object-cover pointer-events-none"
+                      />
+                    )}
+
+                    {/* 2. Interactive Tattoo Canvas (Multiply) */}
+                    <canvas
+                      ref={canvasRef}
+                      className={`absolute inset-0 w-full h-full mix-blend-multiply ${studioMode === 'move' ? 'cursor-move' : 'cursor-crosshair'}`}
+                      onPointerDown={handlePointerDown}
+                      onPointerMove={handlePointerMove}
+                      onPointerUp={handlePointerUp}
+                      onPointerLeave={handlePointerUp}
+                    />
+
+                    {/* 3. Skin Highlights (Screen) - Adds realism over the ink */}
+                    {bodyImage && (
+                      <img
+                        src={bodyImage}
+                        alt="Highlights"
+                        className="absolute inset-0 w-full h-full object-cover mix-blend-screen opacity-15 pointer-events-none"
+                      />
+                    )}
+
+                    {/* Instruction Overlay */}
+                    <div className="absolute bottom-4 left-0 right-0 flex justify-center pointer-events-none">
+                      <div className="bg-zinc-950/80 backdrop-blur-md text-zinc-300 text-xs px-4 py-2 rounded-full border border-zinc-800 shadow-xl">
+                        {studioMode === 'move' ? 'Arrastra para mover el tatuaje' : 'Dibuja sobre el tatuaje para borrar los excesos'}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Controls Sidebar */}
+                <div className="flex flex-col gap-6">
+                  {/* Mode Switcher & History */}
+                  <div className="flex items-center gap-2">
+                    <div className="bg-zinc-900/30 border border-zinc-800/50 rounded-2xl p-2 flex gap-2 flex-1">
+                      <button
+                        onClick={() => setStudioMode('move')}
+                        className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-medium transition-colors ${studioMode === 'move' ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`}
+                      >
+                        <Move className="w-4 h-4" /> Mover
+                      </button>
+                      <button
+                        onClick={() => setStudioMode('erase')}
+                        className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-medium transition-colors ${studioMode === 'erase' ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`}
+                      >
+                        <Eraser className="w-4 h-4" /> Borrar
+                      </button>
+                    </div>
+
+                    <div className="flex items-center gap-2 bg-zinc-900/30 border border-zinc-800/50 rounded-2xl p-2">
+                      <button
+                        onClick={handleUndo}
+                        disabled={historyIndex <= 0}
+                        className="p-3 bg-zinc-800 text-zinc-300 rounded-xl hover:bg-zinc-700 disabled:opacity-50 transition-colors"
+                        title="Deshacer"
+                      >
+                        <Undo className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={handleRedo}
+                        disabled={historyIndex >= history.length - 1}
+                        className="p-3 bg-zinc-800 text-zinc-300 rounded-xl hover:bg-zinc-700 disabled:opacity-50 transition-colors"
+                        title="Rehacer"
+                      >
+                        <Redo className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="bg-zinc-900/30 border border-zinc-800/50 rounded-2xl p-6">
+                    {studioMode === 'move' ? (
+                      <div className="space-y-8">
+                        <div className="flex items-center gap-3 mb-6">
+                          <SlidersHorizontal className="w-5 h-5 text-zinc-400" />
+                          <h3 className="font-medium text-zinc-100">Ajustes del Tatuaje</h3>
+                        </div>
+
+                        {/* Scale Control */}
+                        <div className="space-y-3">
+                          <div className="flex justify-between text-sm">
+                            <label className="text-zinc-400">Tamaño</label>
+                            <span className="text-zinc-500 font-mono">{Math.round(tattooScale * 100)}%</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="0.5"
+                            max="2"
+                            step="0.05"
+                            value={tattooScale}
+                            onChange={(e) => setTattooScale(parseFloat(e.target.value))}
+                            onPointerUp={(e) => saveStateToHistory({ scale: parseFloat(e.currentTarget.value) })}
+                            onKeyUp={(e) => saveStateToHistory({ scale: parseFloat(e.currentTarget.value) })}
+                            className="w-full accent-zinc-100 h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer"
+                          />
+                        </div>
+
+                        {/* Rotation Control */}
+                        <div className="space-y-3">
+                          <div className="flex justify-between text-sm">
+                            <label className="text-zinc-400">Rotación</label>
+                            <span className="text-zinc-500 font-mono">{tattooRotation}°</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="-180"
+                            max="180"
+                            value={tattooRotation}
+                            onChange={(e) => setTattooRotation(parseInt(e.target.value))}
+                            onPointerUp={(e) => saveStateToHistory({ rotation: parseInt(e.currentTarget.value) })}
+                            onKeyUp={(e) => saveStateToHistory({ rotation: parseInt(e.currentTarget.value) })}
+                            className="w-full accent-zinc-100 h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer"
+                          />
+                        </div>
+
+                        {/* Opacity/Fading Control */}
+                        <div className="space-y-3">
+                          <div className="flex justify-between text-sm">
+                            <label className="text-zinc-400">Intensidad (Tinta Fresca)</label>
+                            <span className="text-zinc-500 font-mono">{Math.round(tattooOpacity * 100)}%</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="0.3"
+                            max="1"
+                            step="0.05"
+                            value={tattooOpacity}
+                            onChange={(e) => setTattooOpacity(parseFloat(e.target.value))}
+                            onPointerUp={(e) => saveStateToHistory({ opacity: parseFloat(e.currentTarget.value) })}
+                            onKeyUp={(e) => saveStateToHistory({ opacity: parseFloat(e.currentTarget.value) })}
+                            className="w-full accent-zinc-100 h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer"
+                          />
+                          <p className="text-xs text-zinc-600">Bájalo para simular un tatuaje curado.</p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-8">
+                        <div className="flex items-center gap-3 mb-6">
+                          <Eraser className="w-5 h-5 text-zinc-400" />
+                          <h3 className="font-medium text-zinc-100">Borrador Mágico</h3>
+                        </div>
+                        <p className="text-sm text-zinc-400 leading-relaxed">
+                          Pasa el cursor sobre las partes del tatuaje que se salen de tu cuerpo para borrarlas.
+                        </p>
+
+                        <div className="space-y-3">
+                          <div className="flex justify-between text-sm">
+                            <label className="text-zinc-400">Tamaño del pincel</label>
+                          </div>
+                          <input
+                            type="range"
+                            min="5"
+                            max="80"
+                            value={eraserSize}
+                            onChange={(e) => setEraserSize(parseInt(e.target.value))}
+                            className="w-full accent-zinc-100 h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer"
+                          />
+                        </div>
+
+                        <div className="flex gap-3 pt-4 border-t border-zinc-800/50">
+                          <button
+                            onClick={() => {
+                              setEraserStrokes([]);
+                              saveStateToHistory({ strokes: [] });
+                            }}
+                            disabled={eraserStrokes.length === 0}
+                            className="w-full flex items-center justify-center gap-2 bg-red-950/30 text-red-400 py-3 rounded-xl text-sm font-medium hover:bg-red-900/40 transition-colors disabled:opacity-50"
+                          >
+                            Limpiar borrados
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex flex-col gap-3 mt-auto">
+                    <button
+                      onClick={handleDownload}
+                      className="w-full bg-zinc-800 text-zinc-100 font-medium rounded-xl p-4 flex items-center justify-center gap-2 hover:bg-zinc-700 transition-colors"
+                    >
+                      <Download className="w-5 h-5" />
+                      Descargar Boceto
+                    </button>
+
+                    <button
+                      onClick={handleGenerateFinalImage}
+                      className="w-full bg-zinc-100 text-zinc-950 font-medium rounded-xl p-4 flex items-center justify-center gap-2 hover:bg-white transition-colors shadow-2xl"
+                    >
+                      <Sparkles className="w-5 h-5" />
+                      Aplicar Realismo con IA
+                    </button>
+                  </div>
+                </div>
               </div>
-              <button 
-                onClick={() => setStep(5)}
-                className="flex items-center gap-2 text-sm font-medium text-zinc-400 hover:text-zinc-100 bg-zinc-900/50 hover:bg-zinc-800 px-4 py-2 rounded-full border border-zinc-800/50 transition-all self-start md:self-auto"
-              >
-                <ArrowLeft className="w-4 h-4" /> Volver al resultado
-              </button>
-            </div>
+            </motion.div>
+          )}
 
-            <div className="bg-zinc-900/30 border border-zinc-800/50 rounded-3xl p-2 md:p-6 overflow-hidden">
-              {/* Cal.com embed iframe */}
-              <iframe 
-                src="https://cal.com/team/calcom/30min?embed=true&theme=dark" 
-                className="w-full h-[700px] border-0 rounded-2xl bg-zinc-950"
-                title="Agendar Sesión"
-              ></iframe>
-            </div>
-          </motion.div>
-        )}
+          {/* Step 5: Final AI Result */}
+          {step === 5 && (
+            <motion.div
+              key="step5"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              transition={{ duration: 0.4 }}
+              className="max-w-4xl mx-auto"
+            >
+              <div className="flex flex-col md:flex-row md:items-center justify-between mb-10 gap-4">
+                <div>
+                  <h1 className="text-4xl font-light tracking-tight mb-2">Resultado Final</h1>
+                  <p className="text-zinc-400">Tu diseño adaptado anatómicamente con IA.</p>
+                </div>
+                <button
+                  onClick={() => setStep(4)}
+                  className="flex items-center gap-2 text-sm font-medium text-zinc-400 hover:text-zinc-100 bg-zinc-900/50 hover:bg-zinc-800 px-4 py-2 rounded-full border border-zinc-800/50 transition-all self-start md:self-auto"
+                >
+                  <ArrowLeft className="w-4 h-4" /> Volver al estudio
+                </button>
+              </div>
+
+              <div className="bg-zinc-900/30 border border-zinc-800/50 rounded-3xl p-2 md:p-6 relative overflow-hidden">
+                {isGeneratingFinal ? (
+                  <div className="aspect-[3/4] md:aspect-video rounded-2xl bg-zinc-950 flex flex-col items-center justify-center text-zinc-400 border border-zinc-800/50 relative overflow-hidden">
+                    <LoadingInkAnimation label="Procesando realismo..." subLabel="Añadiendo textura de piel y ajustando iluminación" />
+                  </div>
+                ) : finalTryOnImage ? (
+                  <div className="aspect-[3/4] md:aspect-video rounded-2xl overflow-hidden bg-zinc-950 border border-zinc-800/50 relative group">
+                    <img src={finalTryOnImage} alt="Tattoo Try-On Result" className="w-full h-full object-contain" />
+                    <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                      <button
+                        onClick={() => {
+                          const link = document.createElement('a');
+                          link.download = 'tattoo-ai-result.jpg';
+                          link.href = finalTryOnImage;
+                          link.click();
+                        }}
+                        className="bg-zinc-100 text-zinc-950 px-6 py-3 rounded-xl font-medium flex items-center gap-2 hover:bg-white transition-colors"
+                      >
+                        <Download className="w-5 h-5" />
+                        Descargar Imagen Final
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="aspect-[3/4] md:aspect-video rounded-2xl bg-zinc-950 flex flex-col items-center justify-center text-zinc-400 border border-zinc-800/50">
+                    <p>Error al generar la imagen.</p>
+                  </div>
+                )}
+              </div>
+
+              {!isGeneratingFinal && finalTryOnImage && (
+                <div className="mt-12 flex flex-col sm:flex-row justify-center gap-4">
+                  <button
+                    onClick={() => setStep(6)}
+                    className="bg-zinc-100 text-zinc-950 font-medium rounded-xl px-8 py-4 flex items-center justify-center gap-2 hover:bg-white transition-colors"
+                  >
+                    <Calendar className="w-5 h-5" />
+                    Agendar Sesión
+                  </button>
+                  <button
+                    onClick={() => {
+                      setStep(1);
+                      setBodyImage(null);
+                      setFinalTryOnImage(null);
+                      setSelectedConcept(null);
+                      setTattooPos({ x: 0, y: 0 });
+                      setTattooScale(1);
+                      setTattooRotation(0);
+                      setEraserStrokes([]);
+                      setFormData({ ...formData, meaning: '' });
+                    }}
+                    className="bg-zinc-800 text-zinc-100 font-medium rounded-xl px-8 py-4 flex items-center justify-center gap-2 hover:bg-zinc-700 transition-colors"
+                  >
+                    Crear otro tatuaje
+                  </button>
+                </div>
+              )}
+            </motion.div>
+          )}
+
+          {/* Step 6: Booking */}
+          {step === 6 && (
+            <motion.div
+              key="step6"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              transition={{ duration: 0.4 }}
+              className="max-w-5xl mx-auto"
+            >
+              <div className="flex flex-col md:flex-row md:items-center justify-between mb-10 gap-4">
+                <div>
+                  <h1 className="text-4xl font-light tracking-tight mb-2">Reserva tu cita.</h1>
+                  <p className="text-zinc-400">Elige el día y la hora para hacer realidad tu diseño en Al Estilo Estudio.</p>
+                </div>
+                <button
+                  onClick={() => setStep(5)}
+                  className="flex items-center gap-2 text-sm font-medium text-zinc-400 hover:text-zinc-100 bg-zinc-900/50 hover:bg-zinc-800 px-4 py-2 rounded-full border border-zinc-800/50 transition-all self-start md:self-auto"
+                >
+                  <ArrowLeft className="w-4 h-4" /> Volver al resultado
+                </button>
+              </div>
+
+              <div className="bg-zinc-900/30 border border-zinc-800/50 rounded-3xl p-2 md:p-6 overflow-hidden">
+                {/* Cal.com embed iframe */}
+                <iframe
+                  src="https://cal.com/team/calcom/30min?embed=true&theme=dark"
+                  className="w-full h-[700px] border-0 rounded-2xl bg-zinc-950"
+                  title="Agendar Sesión"
+                ></iframe>
+              </div>
+            </motion.div>
+          )}
         </AnimatePresence>
       </main>
     </div>
