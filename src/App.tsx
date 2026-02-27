@@ -1,13 +1,21 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Loader2, Sparkles, ArrowRight, CheckCircle2, Upload, Camera, X, RefreshCw, SlidersHorizontal, Download, Eraser, Move, Undo } from 'lucide-react';
+import { Loader2, Sparkles, ArrowRight, CheckCircle2, Upload, Camera, X, RefreshCw, SlidersHorizontal, Download, Eraser, Move, Undo, Redo, Calendar, Crown } from 'lucide-react';
 import { generateConcepts, generateTattooImage, generateFinalTryOn } from './services/ai';
 import type { TattooFormData, TattooConcept } from './types';
 
 type Point = { x: number, y: number };
 type Stroke = Point[];
 
+type StudioState = {
+  pos: { x: number, y: number };
+  scale: number;
+  rotation: number;
+  opacity: number;
+  strokes: Stroke[];
+};
+
 export default function App() {
-  const [step, setStep] = useState<1 | 2 | 3 | 4 | 5>(1);
+  const [step, setStep] = useState<1 | 2 | 3 | 4 | 5 | 6>(1);
   const [formData, setFormData] = useState<TattooFormData>({
     style: 'Blackwork',
     meaning: '',
@@ -17,21 +25,7 @@ export default function App() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [concepts, setConcepts] = useState<TattooConcept[]>([]);
   const [selectedConcept, setSelectedConcept] = useState<TattooConcept | null>(null);
-
-  // History State
-  const [history, setHistory] = useState<{ id: string, image: string, conceptTitle: string, date: string, prompt: string }[]>(() => {
-    try {
-      const saved = localStorage.getItem('tattoo-history');
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
-
-  useEffect(() => {
-    localStorage.setItem('tattoo-history', JSON.stringify(history));
-  }, [history]);
-
+  
   // Try-On State
   const [bodyImage, setBodyImage] = useState<string | null>(null);
   const [isCameraOpen, setIsCameraOpen] = useState(false);
@@ -46,7 +40,7 @@ export default function App() {
   const [tattooRotation, setTattooRotation] = useState(0);
   const [tattooOpacity, setTattooOpacity] = useState(1.0);
   const [eraserSize, setEraserSize] = useState(25);
-
+  
   const [eraserStrokes, setEraserStrokes] = useState<Stroke[]>([]);
   const currentStroke = useRef<Stroke>([]);
   const isDragging = useRef(false);
@@ -54,27 +48,110 @@ export default function App() {
   const dragStart = useRef({ x: 0, y: 0 });
   const tattooImageRef = useRef<HTMLImageElement | null>(null);
 
+  // History State
+  const [history, setHistory] = useState<StudioState[]>([]);
+  const [historyIndex, setHistoryIndex] = useState<number>(-1);
+  const currentStateRef = useRef<StudioState>({
+    pos: { x: 0, y: 0 },
+    scale: 1,
+    rotation: 0,
+    opacity: 1.0,
+    strokes: []
+  });
+
+  useEffect(() => {
+    currentStateRef.current = {
+      pos: tattooPos,
+      scale: tattooScale,
+      rotation: tattooRotation,
+      opacity: tattooOpacity,
+      strokes: eraserStrokes
+    };
+  }, [tattooPos, tattooScale, tattooRotation, tattooOpacity, eraserStrokes]);
+
+  useEffect(() => {
+    if (step === 4 && selectedConcept) {
+      const initialState = {
+        pos: { x: 0, y: 0 },
+        scale: 1,
+        rotation: 0,
+        opacity: 1.0,
+        strokes: []
+      };
+      setHistory([initialState]);
+      setHistoryIndex(0);
+      
+      setTattooPos(initialState.pos);
+      setTattooScale(initialState.scale);
+      setTattooRotation(initialState.rotation);
+      setTattooOpacity(initialState.opacity);
+      setEraserStrokes(initialState.strokes);
+      
+      currentStateRef.current = initialState;
+    }
+  }, [step, selectedConcept]);
+
+  const saveStateToHistory = (override?: Partial<StudioState>) => {
+    const state = { ...currentStateRef.current, ...override };
+    setHistory(prev => {
+      const newHistory = prev.slice(0, historyIndex + 1);
+      const lastState = newHistory[newHistory.length - 1];
+      if (lastState && JSON.stringify(lastState) === JSON.stringify(state)) {
+        return newHistory;
+      }
+      newHistory.push(state);
+      return newHistory;
+    });
+    setHistoryIndex(prev => prev + 1);
+  };
+
+  const handleUndo = () => {
+    if (historyIndex > 0) {
+      const newIndex = historyIndex - 1;
+      const state = history[newIndex];
+      setTattooPos(state.pos);
+      setTattooScale(state.scale);
+      setTattooRotation(state.rotation);
+      setTattooOpacity(state.opacity);
+      setEraserStrokes(state.strokes);
+      setHistoryIndex(newIndex);
+    }
+  };
+
+  const handleRedo = () => {
+    if (historyIndex < history.length - 1) {
+      const newIndex = historyIndex + 1;
+      const state = history[newIndex];
+      setTattooPos(state.pos);
+      setTattooScale(state.scale);
+      setTattooRotation(state.rotation);
+      setTattooOpacity(state.opacity);
+      setEraserStrokes(state.strokes);
+      setHistoryIndex(newIndex);
+    }
+  };
+
   // Final Result State
   const [isGeneratingFinal, setIsGeneratingFinal] = useState(false);
   const [finalTryOnImage, setFinalTryOnImage] = useState<string | null>(null);
 
   const generateImagesForConcepts = async (generatedConcepts: TattooConcept[]) => {
-    const conceptsWithLoading = generatedConcepts.map(c => ({
-      ...c,
-      imageUrl: undefined,
-      isGeneratingImage: true
+    const conceptsWithLoading = generatedConcepts.map(c => ({ 
+      ...c, 
+      imageUrl: undefined, 
+      isGeneratingImage: true 
     }));
     setConcepts(conceptsWithLoading);
 
     for (let i = 0; i < generatedConcepts.length; i++) {
       try {
         const imageUrl = await generateTattooImage(generatedConcepts[i].technicalPrompt, formData.style);
-        setConcepts(prev => prev.map((c, index) =>
+        setConcepts(prev => prev.map((c, index) => 
           index === i ? { ...c, imageUrl, isGeneratingImage: false } : c
         ));
       } catch (error) {
         console.error(`Error generating image for concept ${i}:`, error);
-        setConcepts(prev => prev.map((c, index) =>
+        setConcepts(prev => prev.map((c, index) => 
           index === i ? { ...c, isGeneratingImage: false } : c
         ));
       }
@@ -102,19 +179,19 @@ export default function App() {
     const concept = concepts[conceptIndex];
     if (!concept) return;
 
-    setConcepts(prev => prev.map((c, i) =>
+    setConcepts(prev => prev.map((c, i) => 
       i === conceptIndex ? { ...c, isGeneratingImage: true } : c
     ));
 
     try {
       const imageUrl = await generateTattooImage(concept.technicalPrompt, formData.style);
-      setConcepts(prev => prev.map((c, i) =>
+      setConcepts(prev => prev.map((c, i) => 
         i === conceptIndex ? { ...c, imageUrl, isGeneratingImage: false } : c
       ));
     } catch (error) {
       console.error(error);
       alert("Error al regenerar el diseño.");
-      setConcepts(prev => prev.map((c, i) =>
+      setConcepts(prev => prev.map((c, i) => 
         i === conceptIndex ? { ...c, isGeneratingImage: false } : c
       ));
     }
@@ -155,7 +232,7 @@ export default function App() {
       if (ctx) {
         ctx.drawImage(videoRef.current, 0, 0);
         setBodyImage(canvas.toDataURL('image/jpeg'));
-
+        
         const stream = videoRef.current.srcObject as MediaStream;
         stream?.getTracks().forEach(track => track.stop());
         setIsCameraOpen(false);
@@ -226,7 +303,7 @@ export default function App() {
       ctx.lineJoin = 'round';
       ctx.lineWidth = eraserSize;
       ctx.strokeStyle = 'rgba(0,0,0,1)';
-
+      
       eraserStrokes.forEach(drawStroke);
       if (currentStroke.current.length > 0) {
         drawStroke(currentStroke.current);
@@ -235,95 +312,52 @@ export default function App() {
     }
   };
 
-  const activePointers = useRef<Map<number, { x: number, y: number }>>(new Map());
-  const initialPinchDist = useRef<number | null>(null);
-  const initialScale = useRef<number>(1);
-  const initialPinchAngle = useRef<number | null>(null);
-  const initialRotation = useRef<number>(0);
-
-  const getCanvasPoint = (clientX: number, clientY: number) => {
+  const getCanvasPoint = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return { x: 0, y: 0 };
     const scaleX = canvasRef.current!.width / rect.width;
     const scaleY = canvasRef.current!.height / rect.height;
     return {
-      x: (clientX - rect.left) * scaleX,
-      y: (clientY - rect.top) * scaleY
+      x: (e.clientX - rect.left) * scaleX,
+      y: (e.clientY - rect.top) * scaleY
     };
   };
 
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     e.currentTarget.setPointerCapture(e.pointerId);
-    activePointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
-
     if (studioMode === 'move') {
-      if (activePointers.current.size === 1) {
-        isDragging.current = true;
-        dragStart.current = { x: e.clientX - tattooPos.x, y: e.clientY - tattooPos.y };
-      } else if (activePointers.current.size === 2) {
-        isDragging.current = false;
-        const pts = Array.from(activePointers.current.values()) as { x: number, y: number }[];
-        const dx = pts[0].x - pts[1].x;
-        const dy = pts[0].y - pts[1].y;
-        initialPinchDist.current = Math.hypot(dx, dy);
-        initialScale.current = tattooScale;
-        initialPinchAngle.current = Math.atan2(dy, dx) * (180 / Math.PI);
-        initialRotation.current = tattooRotation;
-      }
+      isDragging.current = true;
+      dragStart.current = { x: e.clientX - tattooPos.x, y: e.clientY - tattooPos.y };
     } else {
       isErasing.current = true;
-      currentStroke.current = [getCanvasPoint(e.clientX, e.clientY)];
+      currentStroke.current = [getCanvasPoint(e)];
       drawCanvas();
     }
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!activePointers.current.has(e.pointerId)) return;
-    activePointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
-
-    if (studioMode === 'move') {
-      if (activePointers.current.size === 1 && isDragging.current) {
-        setTattooPos({ x: e.clientX - dragStart.current.x, y: e.clientY - dragStart.current.y });
-      } else if (activePointers.current.size === 2 && initialPinchDist.current !== null) {
-        const pts = Array.from(activePointers.current.values()) as { x: number, y: number }[];
-        const dx = pts[0].x - pts[1].x;
-        const dy = pts[0].y - pts[1].y;
-
-        const dist = Math.hypot(dx, dy);
-        const scaleFactor = dist / Math.max(1, initialPinchDist.current);
-        setTattooScale(initialScale.current * scaleFactor);
-
-        const angle = Math.atan2(dy, dx) * (180 / Math.PI);
-        let angleDiff = angle - (initialPinchAngle.current || 0);
-        setTattooRotation(initialRotation.current + angleDiff);
-      }
+    if (studioMode === 'move' && isDragging.current) {
+      setTattooPos({ x: e.clientX - dragStart.current.x, y: e.clientY - dragStart.current.y });
     } else if (studioMode === 'erase' && isErasing.current) {
-      currentStroke.current.push(getCanvasPoint(e.clientX, e.clientY));
+      currentStroke.current.push(getCanvasPoint(e));
       drawCanvas();
     }
   };
 
   const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
     e.currentTarget.releasePointerCapture(e.pointerId);
-    activePointers.current.delete(e.pointerId);
-
     if (studioMode === 'move') {
-      if (activePointers.current.size < 2) {
-        initialPinchDist.current = null;
-        initialPinchAngle.current = null;
-      }
-      if (activePointers.current.size === 0) {
+      if (isDragging.current) {
         isDragging.current = false;
-      } else if (activePointers.current.size === 1) {
-        const remaining = (Array.from(activePointers.current.values()) as { x: number, y: number }[])[0];
-        isDragging.current = true;
-        dragStart.current = { x: remaining.x - tattooPos.x, y: remaining.y - tattooPos.y };
+        saveStateToHistory({ pos: { x: e.clientX - dragStart.current.x, y: e.clientY - dragStart.current.y } });
       }
     } else if (studioMode === 'erase' && isErasing.current) {
       isErasing.current = false;
       if (currentStroke.current.length > 0) {
-        setEraserStrokes(prev => [...prev, currentStroke.current]);
+        const newStrokes = [...eraserStrokes, currentStroke.current];
+        setEraserStrokes(newStrokes);
         currentStroke.current = [];
+        saveStateToHistory({ strokes: newStrokes });
       }
     }
   };
@@ -347,7 +381,7 @@ export default function App() {
     const scale = Math.max(exportCanvas.width / img.width, exportCanvas.height / img.height);
     const x = (exportCanvas.width / 2) - (img.width / 2) * scale;
     const y = (exportCanvas.height / 2) - (img.height / 2) * scale;
-
+    
     // 1. Base Body
     ctx.drawImage(img, x, y, img.width * scale, img.height * scale);
 
@@ -398,8 +432,8 @@ export default function App() {
       <header className="border-b border-zinc-900 bg-zinc-950/50 backdrop-blur-xl sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <Sparkles className="w-6 h-6 text-zinc-100" />
-            <span className="text-xl font-medium tracking-tight">TATTOO STUDIO AI</span>
+            <Crown className="w-8 h-8 text-zinc-100" />
+            <span className="text-xl font-bold tracking-widest uppercase">AL ESTILO ESTUDIO</span>
           </div>
           <div className="hidden md:flex items-center gap-4 text-sm font-medium text-zinc-500">
             <span className={step >= 1 ? "text-zinc-50" : ""}>01. Brief</span>
@@ -410,7 +444,9 @@ export default function App() {
             <span className="w-4 h-[1px] bg-zinc-800"></span>
             <span className={step >= 4 ? "text-zinc-50" : ""}>04. Estudio Pro</span>
             <span className="w-4 h-[1px] bg-zinc-800"></span>
-            <span className={step >= 5 ? "text-zinc-50" : ""}>05. Resultado IA</span>
+            <span className={step >= 5 ? "text-zinc-50" : ""}>05. Resultado</span>
+            <span className="w-4 h-[1px] bg-zinc-800"></span>
+            <span className={step >= 6 ? "text-zinc-50" : ""}>06. Agendar</span>
           </div>
         </div>
       </header>
@@ -418,113 +454,76 @@ export default function App() {
       <main className="max-w-7xl mx-auto px-6 py-12">
         {/* Step 1: Brief */}
         {step === 1 && (
-          <div className="max-w-7xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-700">
+          <div className="max-w-2xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-700">
             <h1 className="text-5xl font-light tracking-tight mb-4">Crea tu diseño.</h1>
             <p className="text-zinc-400 text-lg mb-12 leading-relaxed">Describe tu idea, elige un estilo y deja que la IA genere conceptos únicos para tu próximo tatuaje.</p>
-
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              <div className="lg:col-span-2">
-                <form onSubmit={handleGenerateConcepts} className="space-y-8 bg-zinc-900/30 p-8 rounded-3xl border border-zinc-800/50">
-                  <div className="space-y-3">
-                    <label className="text-sm font-medium text-zinc-300 uppercase tracking-wider">Estilo del Tatuaje</label>
-                    <select
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-4 text-zinc-100 focus:ring-2 focus:ring-zinc-700 focus:border-transparent outline-none transition-all appearance-none"
-                      value={formData.style}
-                      onChange={e => setFormData({ ...formData, style: e.target.value })}
-                    >
-                      <option>Blackwork</option>
-                      <option>Tradicional (Old School)</option>
-                      <option>Realismo</option>
-                      <option>Minimalista / Fineline</option>
-                      <option>Japonés (Irezumi)</option>
-                      <option>Acuarela</option>
-                      <option>Geométrico</option>
-                    </select>
-                  </div>
-
-                  <div className="space-y-3">
-                    <label className="text-sm font-medium text-zinc-300 uppercase tracking-wider">Historia o Significado</label>
-                    <textarea
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-4 text-zinc-100 focus:ring-2 focus:ring-zinc-700 focus:border-transparent outline-none transition-all min-h-[120px] resize-none"
-                      placeholder="Ej: Quiero representar la superación de un momento difícil, como un fénix o algo relacionado con el renacer..."
-                      value={formData.meaning}
-                      onChange={e => setFormData({ ...formData, meaning: e.target.value })}
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-6">
-                    <div className="space-y-3">
-                      <label className="text-sm font-medium text-zinc-300 uppercase tracking-wider">Parte del Cuerpo</label>
-                      <input
-                        type="text"
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-4 text-zinc-100 focus:ring-2 focus:ring-zinc-700 focus:border-transparent outline-none transition-all"
-                        placeholder="Ej: Antebrazo"
-                        value={formData.bodyPart}
-                        onChange={e => setFormData({ ...formData, bodyPart: e.target.value })}
-                      />
-                    </div>
-                    <div className="space-y-3">
-                      <label className="text-sm font-medium text-zinc-300 uppercase tracking-wider">Tamaño</label>
-                      <select
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-4 text-zinc-100 focus:ring-2 focus:ring-zinc-700 focus:border-transparent outline-none transition-all appearance-none"
-                        value={formData.size}
-                        onChange={e => setFormData({ ...formData, size: e.target.value })}
-                      >
-                        <option>Pequeño (1-5cm)</option>
-                        <option>Mediano (10-15cm)</option>
-                        <option>Grande (20cm+)</option>
-                        <option>Manga completa</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <button
-                    type="submit"
-                    disabled={!formData.meaning || isGenerating}
-                    className="w-full bg-zinc-100 text-zinc-950 font-medium rounded-xl p-4 flex items-center justify-center gap-2 hover:bg-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed mt-4"
-                  >
-                    {isGenerating ? (
-                      <><Loader2 className="w-5 h-5 animate-spin" /> Generando conceptos...</>
-                    ) : (
-                      <><Sparkles className="w-5 h-5" /> Generar Ideas</>
-                    )}
-                  </button>
-                </form>
+            
+            <form onSubmit={handleGenerateConcepts} className="space-y-8 bg-zinc-900/30 p-8 rounded-3xl border border-zinc-800/50">
+              <div className="space-y-3">
+                <label className="text-sm font-medium text-zinc-300 uppercase tracking-wider">Estilo del Tatuaje</label>
+                <select 
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-4 text-zinc-100 focus:ring-2 focus:ring-zinc-700 focus:border-transparent outline-none transition-all appearance-none"
+                  value={formData.style}
+                  onChange={e => setFormData({...formData, style: e.target.value})}
+                >
+                  <option>Blackwork</option>
+                  <option>Tradicional (Old School)</option>
+                  <option>Realismo</option>
+                  <option>Minimalista / Fineline</option>
+                  <option>Japonés (Irezumi)</option>
+                  <option>Acuarela</option>
+                  <option>Geométrico</option>
+                </select>
               </div>
 
-              {/* History Sidebar */}
-              {history.length > 0 && (
-                <div className="lg:col-span-1 bg-zinc-900/30 p-6 rounded-3xl border border-zinc-800/50 flex flex-col h-full max-h-[650px]">
-                  <h3 className="text-lg font-medium tracking-tight mb-4 flex items-center gap-2">
-                    <CheckCircle2 className="w-5 h-5 text-zinc-400" /> Historial de Tatuajes
-                  </h3>
-                  <div className="overflow-y-auto pr-2 space-y-4 flex-grow">
-                    {history.map((item, i) => (
-                      <div key={i} className="bg-zinc-950 border border-zinc-800 rounded-xl overflow-hidden shadow-md flex gap-3 p-3">
-                        <div className="w-20 h-20 bg-zinc-900 rounded-lg flex-shrink-0 overflow-hidden relative">
-                          <img src={item.image} alt={item.conceptTitle} className="w-full h-full object-cover" />
-                        </div>
-                        <div className="flex flex-col flex-grow justify-center">
-                          <h4 className="font-medium text-sm text-zinc-100 line-clamp-1">{item.conceptTitle}</h4>
-                          <p className="text-xs text-zinc-500 mt-1">{item.date}</p>
-                          <button
-                            onClick={() => {
-                              const link = document.createElement('a');
-                              link.download = `tattoo-history-${item.date}.jpg`;
-                              link.href = item.image;
-                              link.click();
-                            }}
-                            className="text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-300 px-3 py-1.5 rounded-md mt-2 w-max transition-colors"
-                          >
-                            Descargar
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+              <div className="space-y-3">
+                <label className="text-sm font-medium text-zinc-300 uppercase tracking-wider">Historia o Significado</label>
+                <textarea 
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-4 text-zinc-100 focus:ring-2 focus:ring-zinc-700 focus:border-transparent outline-none transition-all min-h-[120px] resize-none"
+                  placeholder="Ej: Quiero representar la superación de un momento difícil, como un fénix o algo relacionado con el renacer..."
+                  value={formData.meaning}
+                  onChange={e => setFormData({...formData, meaning: e.target.value})}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-6">
+                <div className="space-y-3">
+                  <label className="text-sm font-medium text-zinc-300 uppercase tracking-wider">Parte del Cuerpo</label>
+                  <input 
+                    type="text"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-4 text-zinc-100 focus:ring-2 focus:ring-zinc-700 focus:border-transparent outline-none transition-all"
+                    placeholder="Ej: Antebrazo"
+                    value={formData.bodyPart}
+                    onChange={e => setFormData({...formData, bodyPart: e.target.value})}
+                  />
                 </div>
-              )}
-            </div>
+                <div className="space-y-3">
+                  <label className="text-sm font-medium text-zinc-300 uppercase tracking-wider">Tamaño</label>
+                  <select 
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-4 text-zinc-100 focus:ring-2 focus:ring-zinc-700 focus:border-transparent outline-none transition-all appearance-none"
+                    value={formData.size}
+                    onChange={e => setFormData({...formData, size: e.target.value})}
+                  >
+                    <option>Pequeño (1-5cm)</option>
+                    <option>Mediano (10-15cm)</option>
+                    <option>Grande (20cm+)</option>
+                    <option>Manga completa</option>
+                  </select>
+                </div>
+              </div>
+
+              <button 
+                type="submit"
+                disabled={!formData.meaning || isGenerating}
+                className="w-full bg-zinc-100 text-zinc-950 font-medium rounded-xl p-4 flex items-center justify-center gap-2 hover:bg-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed mt-4"
+              >
+                {isGenerating ? (
+                  <><Loader2 className="w-5 h-5 animate-spin" /> Generando conceptos...</>
+                ) : (
+                  <><Sparkles className="w-5 h-5" /> Generar Ideas</>
+                )}
+              </button>
+            </form>
           </div>
         )}
 
@@ -533,16 +532,10 @@ export default function App() {
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-700">
             <div className="flex flex-col md:flex-row md:items-end justify-between mb-12 gap-6">
               <div>
-                <button
-                  onClick={() => setStep(1)}
-                  className="text-sm text-zinc-500 hover:text-zinc-300 transition-colors mb-4 inline-flex items-center"
-                >
-                  ← Volver al formulario
-                </button>
                 <h1 className="text-4xl font-light tracking-tight mb-2">Elige tu diseño.</h1>
                 <p className="text-zinc-400">Selecciona el concepto que más te guste para probarlo en tu piel.</p>
               </div>
-              <button
+              <button 
                 onClick={handleGenerateConcepts}
                 disabled={isGenerating}
                 className="flex items-center gap-2 text-sm font-medium text-zinc-400 hover:text-zinc-100 transition-colors bg-zinc-900/50 px-4 py-2 rounded-lg border border-zinc-800"
@@ -568,11 +561,11 @@ export default function App() {
                         <span className="text-sm">Error al generar imagen</span>
                       </div>
                     )}
-
+                    
                     {/* Style Regeneration Overlay */}
                     {!concept.isGeneratingImage && concept.imageUrl && (
                       <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button
+                        <button 
                           onClick={() => handleRegenerateStyle(idx)}
                           className="bg-zinc-950/80 backdrop-blur-md text-zinc-300 hover:text-white text-xs font-medium px-3 py-2 rounded-lg border border-zinc-800 flex items-center gap-2"
                         >
@@ -582,12 +575,12 @@ export default function App() {
                       </div>
                     )}
                   </div>
-
+                  
                   <div className="p-6 flex flex-col flex-grow">
                     <h3 className="text-xl font-medium mb-3">{concept.title}</h3>
                     <p className="text-zinc-400 text-sm leading-relaxed mb-6 flex-grow">{concept.narrative}</p>
-
-                    <button
+                    
+                    <button 
                       onClick={() => {
                         setSelectedConcept(concept);
                         setStep(3);
@@ -629,7 +622,7 @@ export default function App() {
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <button
+                <button 
                   onClick={startCamera}
                   className="bg-zinc-900/30 border border-zinc-800/50 rounded-3xl p-12 flex flex-col items-center justify-center gap-4 hover:bg-zinc-900/50 transition-colors group"
                 >
@@ -659,7 +652,7 @@ export default function App() {
                 <h1 className="text-4xl font-light tracking-tight mb-2">Estudio Pro</h1>
                 <p className="text-zinc-400">Ajusta, borra los excesos y aplica realismo.</p>
               </div>
-              <button
+              <button 
                 onClick={() => setStep(3)}
                 className="text-sm text-zinc-500 hover:text-zinc-300 transition-colors self-start md:self-auto"
               >
@@ -670,15 +663,15 @@ export default function App() {
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
               {/* Canvas Area */}
               <div className="lg:col-span-2 bg-zinc-900/30 border border-zinc-800/50 rounded-3xl p-2 md:p-6">
-                <div
-                  ref={containerRef}
+                <div 
+                  ref={containerRef} 
                   className="relative w-full aspect-[3/4] md:aspect-square lg:aspect-video rounded-2xl overflow-hidden bg-zinc-950 border border-zinc-800/50 shadow-2xl touch-none"
                 >
                   {/* 1. Base Body Image */}
                   {bodyImage && (
-                    <img
-                      src={bodyImage}
-                      alt="Body"
+                    <img 
+                      src={bodyImage} 
+                      alt="Body" 
                       className="absolute inset-0 w-full h-full object-cover pointer-events-none"
                     />
                   )}
@@ -695,9 +688,9 @@ export default function App() {
 
                   {/* 3. Skin Highlights (Screen) - Adds realism over the ink */}
                   {bodyImage && (
-                    <img
-                      src={bodyImage}
-                      alt="Highlights"
+                    <img 
+                      src={bodyImage} 
+                      alt="Highlights" 
                       className="absolute inset-0 w-full h-full object-cover mix-blend-screen opacity-15 pointer-events-none"
                     />
                   )}
@@ -705,7 +698,7 @@ export default function App() {
                   {/* Instruction Overlay */}
                   <div className="absolute bottom-4 left-0 right-0 flex justify-center pointer-events-none">
                     <div className="bg-zinc-950/80 backdrop-blur-md text-zinc-300 text-xs px-4 py-2 rounded-full border border-zinc-800 shadow-xl">
-                      {studioMode === 'move' ? 'Arrastra para mover. Dos dedos para escalar y rotar.' : 'Dibuja sobre el tatuaje para borrar los excesos que se salgan del cuerpo'}
+                      {studioMode === 'move' ? 'Arrastra para mover el tatuaje' : 'Dibuja sobre el tatuaje para borrar los excesos'}
                     </div>
                   </div>
                 </div>
@@ -713,20 +706,41 @@ export default function App() {
 
               {/* Controls Sidebar */}
               <div className="flex flex-col gap-6">
-                {/* Mode Switcher */}
-                <div className="bg-zinc-900/30 border border-zinc-800/50 rounded-2xl p-2 flex gap-2">
-                  <button
-                    onClick={() => setStudioMode('move')}
-                    className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-medium transition-colors ${studioMode === 'move' ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`}
-                  >
-                    <Move className="w-4 h-4" /> Mover
-                  </button>
-                  <button
-                    onClick={() => setStudioMode('erase')}
-                    className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-medium transition-colors ${studioMode === 'erase' ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`}
-                  >
-                    <Eraser className="w-4 h-4" /> Borrar
-                  </button>
+                {/* Mode Switcher & History */}
+                <div className="flex items-center gap-2">
+                  <div className="bg-zinc-900/30 border border-zinc-800/50 rounded-2xl p-2 flex gap-2 flex-1">
+                    <button 
+                      onClick={() => setStudioMode('move')}
+                      className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-medium transition-colors ${studioMode === 'move' ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`}
+                    >
+                      <Move className="w-4 h-4" /> Mover
+                    </button>
+                    <button 
+                      onClick={() => setStudioMode('erase')}
+                      className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-medium transition-colors ${studioMode === 'erase' ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`}
+                    >
+                      <Eraser className="w-4 h-4" /> Borrar
+                    </button>
+                  </div>
+                  
+                  <div className="flex items-center gap-2 bg-zinc-900/30 border border-zinc-800/50 rounded-2xl p-2">
+                    <button 
+                      onClick={handleUndo} 
+                      disabled={historyIndex <= 0}
+                      className="p-3 bg-zinc-800 text-zinc-300 rounded-xl hover:bg-zinc-700 disabled:opacity-50 transition-colors"
+                      title="Deshacer"
+                    >
+                      <Undo className="w-4 h-4" />
+                    </button>
+                    <button 
+                      onClick={handleRedo} 
+                      disabled={historyIndex >= history.length - 1}
+                      className="p-3 bg-zinc-800 text-zinc-300 rounded-xl hover:bg-zinc-700 disabled:opacity-50 transition-colors"
+                      title="Rehacer"
+                    >
+                      <Redo className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
 
                 <div className="bg-zinc-900/30 border border-zinc-800/50 rounded-2xl p-6">
@@ -743,13 +757,15 @@ export default function App() {
                           <label className="text-zinc-400">Tamaño</label>
                           <span className="text-zinc-500 font-mono">{Math.round(tattooScale * 100)}%</span>
                         </div>
-                        <input
-                          type="range"
-                          min="0.5"
-                          max="2"
-                          step="0.05"
+                        <input 
+                          type="range" 
+                          min="0.5" 
+                          max="2" 
+                          step="0.05" 
                           value={tattooScale}
                           onChange={(e) => setTattooScale(parseFloat(e.target.value))}
+                          onPointerUp={(e) => saveStateToHistory({ scale: parseFloat(e.currentTarget.value) })}
+                          onKeyUp={(e) => saveStateToHistory({ scale: parseFloat(e.currentTarget.value) })}
                           className="w-full accent-zinc-100 h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer"
                         />
                       </div>
@@ -760,12 +776,14 @@ export default function App() {
                           <label className="text-zinc-400">Rotación</label>
                           <span className="text-zinc-500 font-mono">{tattooRotation}°</span>
                         </div>
-                        <input
-                          type="range"
-                          min="-180"
-                          max="180"
+                        <input 
+                          type="range" 
+                          min="-180" 
+                          max="180" 
                           value={tattooRotation}
                           onChange={(e) => setTattooRotation(parseInt(e.target.value))}
+                          onPointerUp={(e) => saveStateToHistory({ rotation: parseInt(e.currentTarget.value) })}
+                          onKeyUp={(e) => saveStateToHistory({ rotation: parseInt(e.currentTarget.value) })}
                           className="w-full accent-zinc-100 h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer"
                         />
                       </div>
@@ -776,13 +794,15 @@ export default function App() {
                           <label className="text-zinc-400">Intensidad (Tinta Fresca)</label>
                           <span className="text-zinc-500 font-mono">{Math.round(tattooOpacity * 100)}%</span>
                         </div>
-                        <input
-                          type="range"
-                          min="0.3"
-                          max="1"
-                          step="0.05"
+                        <input 
+                          type="range" 
+                          min="0.3" 
+                          max="1" 
+                          step="0.05" 
                           value={tattooOpacity}
                           onChange={(e) => setTattooOpacity(parseFloat(e.target.value))}
+                          onPointerUp={(e) => saveStateToHistory({ opacity: parseFloat(e.currentTarget.value) })}
+                          onKeyUp={(e) => saveStateToHistory({ opacity: parseFloat(e.currentTarget.value) })}
                           className="w-full accent-zinc-100 h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer"
                         />
                         <p className="text-xs text-zinc-600">Bájalo para simular un tatuaje curado.</p>
@@ -802,10 +822,10 @@ export default function App() {
                         <div className="flex justify-between text-sm">
                           <label className="text-zinc-400">Tamaño del pincel</label>
                         </div>
-                        <input
-                          type="range"
-                          min="5"
-                          max="80"
+                        <input 
+                          type="range" 
+                          min="5" 
+                          max="80" 
                           value={eraserSize}
                           onChange={(e) => setEraserSize(parseInt(e.target.value))}
                           className="w-full accent-zinc-100 h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer"
@@ -813,19 +833,15 @@ export default function App() {
                       </div>
 
                       <div className="flex gap-3 pt-4 border-t border-zinc-800/50">
-                        <button
-                          onClick={() => setEraserStrokes(prev => prev.slice(0, -1))}
+                        <button 
+                          onClick={() => {
+                            setEraserStrokes([]);
+                            saveStateToHistory({ strokes: [] });
+                          }}
                           disabled={eraserStrokes.length === 0}
-                          className="flex-1 flex items-center justify-center gap-2 bg-zinc-800 text-zinc-300 py-3 rounded-xl text-sm font-medium hover:bg-zinc-700 transition-colors disabled:opacity-50"
+                          className="w-full flex items-center justify-center gap-2 bg-red-950/30 text-red-400 py-3 rounded-xl text-sm font-medium hover:bg-red-900/40 transition-colors disabled:opacity-50"
                         >
-                          <Undo className="w-4 h-4" /> Deshacer
-                        </button>
-                        <button
-                          onClick={() => setEraserStrokes([])}
-                          disabled={eraserStrokes.length === 0}
-                          className="flex-1 flex items-center justify-center gap-2 bg-red-950/30 text-red-400 py-3 rounded-xl text-sm font-medium hover:bg-red-900/40 transition-colors disabled:opacity-50"
-                        >
-                          Limpiar todo
+                          Limpiar borrados
                         </button>
                       </div>
                     </div>
@@ -833,7 +849,7 @@ export default function App() {
                 </div>
 
                 <div className="flex flex-col gap-3 mt-auto">
-                  <button
+                  <button 
                     onClick={handleDownload}
                     className="w-full bg-zinc-800 text-zinc-100 font-medium rounded-xl p-4 flex items-center justify-center gap-2 hover:bg-zinc-700 transition-colors"
                   >
@@ -841,7 +857,7 @@ export default function App() {
                     Descargar Boceto
                   </button>
 
-                  <button
+                  <button 
                     onClick={handleGenerateFinalImage}
                     className="w-full bg-zinc-100 text-zinc-950 font-medium rounded-xl p-4 flex items-center justify-center gap-2 hover:bg-white transition-colors shadow-2xl"
                   >
@@ -862,7 +878,7 @@ export default function App() {
                 <h1 className="text-4xl font-light tracking-tight mb-2">Resultado Final</h1>
                 <p className="text-zinc-400">Tu diseño adaptado anatómicamente con IA.</p>
               </div>
-              <button
+              <button 
                 onClick={() => setStep(4)}
                 className="text-sm text-zinc-500 hover:text-zinc-300 transition-colors self-start md:self-auto"
               >
@@ -880,20 +896,18 @@ export default function App() {
               ) : finalTryOnImage ? (
                 <div className="aspect-[3/4] md:aspect-video rounded-2xl overflow-hidden bg-zinc-950 border border-zinc-800/50 relative group">
                   <img src={finalTryOnImage} alt="Tattoo Try-On Result" className="w-full h-full object-contain" />
-
-                  {/* Download Button (Always semi-visible to be accessible on mobile) */}
-                  <div className="absolute bottom-4 right-4 flex lg:opacity-0 lg:group-hover:opacity-100 transition-opacity drop-shadow-2xl">
-                    <button
+                  <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                    <button 
                       onClick={() => {
                         const link = document.createElement('a');
                         link.download = 'tattoo-ai-result.jpg';
                         link.href = finalTryOnImage;
                         link.click();
                       }}
-                      className="bg-zinc-100 text-zinc-950 px-5 py-3 rounded-xl font-medium flex items-center gap-2 hover:bg-white transition-colors border border-black/10 shadow-lg"
+                      className="bg-zinc-100 text-zinc-950 px-6 py-3 rounded-xl font-medium flex items-center gap-2 hover:bg-white transition-colors"
                     >
                       <Download className="w-5 h-5" />
-                      <span className="hidden sm:inline">Descargar Imagen</span>
+                      Descargar Imagen Final
                     </button>
                   </div>
                 </div>
@@ -905,36 +919,59 @@ export default function App() {
             </div>
 
             {!isGeneratingFinal && finalTryOnImage && (
-              <div className="mt-12 flex justify-center">
-                <button
+              <div className="mt-12 flex flex-col sm:flex-row justify-center gap-4">
+                <button 
+                  onClick={() => setStep(6)}
+                  className="bg-zinc-100 text-zinc-950 font-medium rounded-xl px-8 py-4 flex items-center justify-center gap-2 hover:bg-white transition-colors"
+                >
+                  <Calendar className="w-5 h-5" />
+                  Agendar Sesión
+                </button>
+                <button 
                   onClick={() => {
-                    // Save to history before resetting
-                    if (finalTryOnImage && selectedConcept) {
-                      setHistory(prev => [{
-                        id: Math.random().toString(36).substring(7),
-                        image: finalTryOnImage,
-                        conceptTitle: selectedConcept.title,
-                        prompt: selectedConcept.technicalPrompt,
-                        date: new Date().toLocaleDateString('es-ES', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
-                      }, ...prev]);
-                    }
-
                     setStep(1);
                     setBodyImage(null);
                     setFinalTryOnImage(null);
                     setSelectedConcept(null);
-                    setTattooPos({ x: 0, y: 0 });
+                    setTattooPos({x: 0, y: 0});
                     setTattooScale(1);
                     setTattooRotation(0);
                     setEraserStrokes([]);
+                    setFormData({ ...formData, meaning: '' });
                   }}
-                  className="bg-zinc-800 text-zinc-100 font-medium rounded-xl px-8 py-4 flex items-center justify-center gap-2 hover:bg-zinc-700 transition-colors shadow-xl"
+                  className="bg-zinc-800 text-zinc-100 font-medium rounded-xl px-8 py-4 flex items-center justify-center gap-2 hover:bg-zinc-700 transition-colors"
                 >
-                  <Sparkles className="w-5 h-5" />
-                  Terminar y Crear Nuevo Tatuaje
+                  Crear otro tatuaje
                 </button>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Step 6: Booking */}
+        {step === 6 && (
+          <div className="max-w-5xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-700">
+            <div className="flex flex-col md:flex-row md:items-center justify-between mb-10 gap-4">
+              <div>
+                <h1 className="text-4xl font-light tracking-tight mb-2">Reserva tu cita.</h1>
+                <p className="text-zinc-400">Elige el día y la hora para hacer realidad tu diseño en Al Estilo Estudio.</p>
+              </div>
+              <button 
+                onClick={() => setStep(5)}
+                className="text-sm text-zinc-500 hover:text-zinc-300 transition-colors self-start md:self-auto"
+              >
+                ← Volver al resultado
+              </button>
+            </div>
+
+            <div className="bg-zinc-900/30 border border-zinc-800/50 rounded-3xl p-2 md:p-6 overflow-hidden">
+              {/* Cal.com embed iframe */}
+              <iframe 
+                src="https://cal.com/team/calcom/30min?embed=true&theme=dark" 
+                className="w-full h-[700px] border-0 rounded-2xl bg-zinc-950"
+                title="Agendar Sesión"
+              ></iframe>
+            </div>
           </div>
         )}
       </main>
