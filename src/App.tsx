@@ -806,7 +806,7 @@ export default function App() {
                       onClick={() => {
                         setSelectedConcept(entry.concept);
                         if (bodyImage) setStep(4);
-                        else setStep(2);
+                        else setStep(3);
                       }}
                     >
                       <div className="w-12 h-12 rounded-lg overflow-hidden border border-zinc-800 flex-shrink-0 bg-zinc-950">
@@ -905,7 +905,7 @@ export default function App() {
                         onClick={() => {
                           setSelectedConcept(entry.concept);
                           setHistoryPanelOpen(false);
-                          if (bodyImage) setStep(4); else setStep(2);
+                          if (bodyImage) setStep(4); else setStep(3);
                         }}
                       >
                         <div className="w-10 h-10 rounded-lg overflow-hidden border border-zinc-800 flex-shrink-0">
@@ -1244,7 +1244,7 @@ export default function App() {
                 <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
                   <div>
                     <h1 className="text-4xl font-light tracking-tight mb-2">Estudio Pro</h1>
-                    <p className="text-zinc-400">Ajusta, borra los excesos y aplica realismo.</p>
+                    <p className="text-zinc-400">Escala y posiciona. La IA se encargará de adaptar perfectamente el tatuaje a la anatomía 3D.</p>
                   </div>
                   <button
                     onClick={() => setStep(3)}
@@ -1291,8 +1291,8 @@ export default function App() {
 
                       {/* Instruction Overlay */}
                       <div className="absolute bottom-4 left-0 right-0 flex justify-center pointer-events-none">
-                        <div className="bg-zinc-950/80 backdrop-blur-md text-zinc-300 text-xs px-4 py-2 rounded-full border border-zinc-800 shadow-xl">
-                          {studioMode === 'move' ? 'Arrastra para mover el tatuaje' : 'Dibuja sobre el tatuaje para borrar los excesos'}
+                        <div className="bg-zinc-950/80 backdrop-blur-md text-zinc-300 text-xs px-4 py-2 rounded-full border border-zinc-800 shadow-xl max-w-[90%] text-center">
+                          {studioMode === 'move' ? 'Arrastra para mover. Si el tatuaje se sale de tu cuerpo, la IA le dará la vuelta anatómicamente.' : 'Dibuja sobre detalles que quieras eliminar del tatuaje'}
                         </div>
                       </div>
                     </div>
@@ -1382,26 +1382,7 @@ export default function App() {
                             />
                           </div>
 
-                          {/* Opacity/Fading Control */}
-                          <div className="space-y-3">
-                            <div className="flex justify-between text-sm">
-                              <label className="text-zinc-400">Intensidad (Tinta Fresca)</label>
-                              <span className="text-zinc-500 font-mono">{Math.round(tattooOpacity * 100)}%</span>
-                            </div>
-                            <input
-                              type="range"
-                              min="0.3"
-                              max="1"
-                              step="0.05"
-                              value={tattooOpacity}
-                              onChange={(e) => setTattooOpacity(parseFloat(e.target.value))}
-                              onPointerUp={(e) => saveStateToHistory({ opacity: parseFloat(e.currentTarget.value) })}
-                              onKeyUp={(e) => saveStateToHistory({ opacity: parseFloat(e.currentTarget.value) })}
-                              className="w-full accent-zinc-100 h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer"
-                            />
-                            <p className="text-xs text-zinc-600">Bájalo para simular un tatuaje curado.</p>
-                          </div>
-                        </div>
+                          {/* Opacity control removed per user request */}                        </div>
                       ) : (
                         <div className="space-y-8">
                           <div className="flex items-center gap-3 mb-6">
@@ -1409,7 +1390,7 @@ export default function App() {
                             <h3 className="font-medium text-zinc-100">Borrador Mágico</h3>
                           </div>
                           <p className="text-sm text-zinc-400 leading-relaxed">
-                            Pasa el cursor sobre las partes del tatuaje que se salen de tu cuerpo para borrarlas.
+                            Pasa el cursor sobre elementos del diseño que quieras eliminar por completo.
                           </p>
 
                           <div className="space-y-3">
