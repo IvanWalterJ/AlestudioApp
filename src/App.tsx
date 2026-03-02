@@ -315,8 +315,12 @@ export default function App() {
   }, [step]);
 
   useEffect(() => {
-    drawCanvas();
-  }, [tattooPos, tattooScale, tattooRotation, tattooOpacity, eraserStrokes, bodyImage, step, tattooImageLoaded]);
+    // Small delay to ensure container dimensions are set before drawing
+    const timer = setTimeout(() => {
+      drawCanvas();
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [step, tattooPos, tattooScale, tattooRotation, tattooOpacity, eraserStrokes, bodyImage, tattooImageLoaded]);
 
   const drawCanvas = () => {
     const canvas = canvasRef.current;
@@ -473,37 +477,89 @@ export default function App() {
 
   const getComposedImageBase64 = async (): Promise<string | null> => {
     const container = containerRef.current;
-    const tattooCanvas = canvasRef.current;
-    if (!container || !tattooCanvas || !bodyImage) return null;
-
-    const exportCanvas = document.createElement('canvas');
-    exportCanvas.width = container.offsetWidth;
-    exportCanvas.height = container.offsetHeight;
-    const ctx = exportCanvas.getContext('2d');
-    if (!ctx) return null;
+    if (!container || !bodyImage) return null;
 
     const img = new Image();
     img.crossOrigin = "anonymous";
     img.src = bodyImage;
     await new Promise(r => img.onload = r);
 
-    const scale = Math.max(exportCanvas.width / img.width, exportCanvas.height / img.height);
-    const x = (exportCanvas.width / 2) - (img.width / 2) * scale;
-    const y = (exportCanvas.height / 2) - (img.height / 2) * scale;
+    // Use original image dimensions for export
+    const exportCanvas = document.createElement('canvas');
+    exportCanvas.width = img.width;
+    exportCanvas.height = img.height;
+    const ctx = exportCanvas.getContext('2d');
+    if (!ctx) return null;
 
-    // 1. Base Body
-    ctx.drawImage(img, x, y, img.width * scale, img.height * scale);
+    // Calculate scaling ratio between container and original image
+    const containerRatio = container.offsetWidth / container.offsetHeight;
+    const imgRatio = img.width / img.height;
 
-    // 2. Tattoo (Multiply + Eraser strokes)
-    ctx.globalCompositeOperation = 'multiply';
-    ctx.drawImage(tattooCanvas, 0, 0);
+    let renderWidth, renderHeight, offsetX, offsetY;
+    if (imgRatio > containerRatio) {
+      renderHeight = img.height;
+      renderWidth = img.height * containerRatio;
+      offsetX = (img.width - renderWidth) / 2;
+      offsetY = 0;
+    } else {
+      renderWidth = img.width;
+      renderHeight = img.width / containerRatio;
+      offsetX = 0;
+      offsetY = (img.height - renderHeight) / 2;
+    }
 
-    // 3. Skin Highlights (Screen)
+    const scaleFactor = renderWidth / container.offsetWidth;
+
+    // 1. Draw Base Body (cropped to match container's object-cover)
+    ctx.drawImage(img, offsetX, offsetY, renderWidth, renderHeight, 0, 0, exportCanvas.width, exportCanvas.height);
+
+    // 2. Draw Tattoo at high resolution
+    if (tattooImageRef.current) {
+      ctx.save();
+      // Position relative to center of export canvas
+      const centerX = exportCanvas.width / 2 + tattooPos.x * scaleFactor;
+      const centerY = exportCanvas.height / 2 + tattooPos.y * scaleFactor;
+      ctx.translate(centerX, centerY);
+      ctx.rotate((tattooRotation * Math.PI) / 180);
+      ctx.scale(tattooScale * scaleFactor, tattooScale * scaleFactor);
+
+      // Apply multiply blend mode for the tattoo
+      ctx.globalCompositeOperation = 'multiply';
+      ctx.globalAlpha = tattooOpacity;
+      // The original drawing uses -150, -150 as origin for the 300x300 image
+      ctx.drawImage(tattooImageRef.current, -150, -150, 300, 300);
+      ctx.restore();
+    }
+
+    // 3. Apply eraser strokes at high resolution
+    if (eraserStrokes.length > 0) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.lineWidth = eraserSize * scaleFactor;
+      ctx.strokeStyle = 'rgba(0,0,0,1)';
+
+      eraserStrokes.forEach(stroke => {
+        if (stroke.length < 1) return;
+        ctx.beginPath();
+        ctx.moveTo(stroke[0].x * scaleFactor, stroke[0].y * scaleFactor);
+        for (let i = 1; i < stroke.length; i++) {
+          ctx.lineTo(stroke[i].x * scaleFactor, stroke[i].y * scaleFactor);
+        }
+        ctx.stroke();
+      });
+      ctx.restore();
+    }
+
+    // 4. Skin Highlights (Screen) for realism
+    ctx.save();
     ctx.globalCompositeOperation = 'screen';
-    ctx.globalAlpha = 0.15;
-    ctx.drawImage(img, x, y, img.width * scale, img.height * scale);
+    ctx.globalAlpha = 0.2; // Slightly higher for high-res
+    ctx.drawImage(img, offsetX, offsetY, renderWidth, renderHeight, 0, 0, exportCanvas.width, exportCanvas.height);
+    ctx.restore();
 
-    return exportCanvas.toDataURL('image/jpeg', 0.9);
+    return exportCanvas.toDataURL('image/jpeg', 0.95); // High quality JPEG
   };
 
   const handleDownload = async () => {
