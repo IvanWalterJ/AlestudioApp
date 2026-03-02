@@ -1,4 +1,6 @@
+// Vercel trigger: update env vars
 import React, { useState, useRef, useEffect } from 'react';
+
 import { Loader2, Sparkles, ArrowRight, CheckCircle2, Upload, Camera, X, RefreshCw, SlidersHorizontal, Download, Eraser, Move, Undo, Redo, Calendar, Crown, ArrowLeft } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { generateConcepts, generateTattooImage, generateFinalTryOn } from './services/ai';
