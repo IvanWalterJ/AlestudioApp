@@ -1,10 +1,10 @@
 // Vercel trigger: update env vars
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 
-import { Loader2, Sparkles, ArrowRight, CheckCircle2, Upload, Camera, X, RefreshCw, SlidersHorizontal, Download, Eraser, Move, Undo, Redo, Calendar, Crown, ArrowLeft } from 'lucide-react';
+import { Loader2, Sparkles, ArrowRight, CheckCircle2, Upload, Camera, X, RefreshCw, SlidersHorizontal, Download, Eraser, Move, Undo, Redo, Calendar, Crown, ArrowLeft, Clock, Trash2, ImageIcon, ChevronDown, ChevronUp, Star } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { generateConcepts, generateTattooImage, generateFinalTryOn } from './services/ai';
-import type { TattooFormData, TattooConcept } from './types';
+import type { TattooFormData, TattooConcept, DesignHistoryEntry } from './types';
 
 type Point = { x: number, y: number };
 type Stroke = Point[];
@@ -59,11 +59,23 @@ export default function App() {
     bodyPart: 'Antebrazo',
     referenceImage: null
   });
-  const [designHistory, setDesignHistory] = useState<TattooConcept[]>([]);
+  const [designHistory, setDesignHistory] = useState<DesignHistoryEntry[]>(() => {
+    try {
+      const saved = localStorage.getItem('alestudio_history');
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
   const [isGenerating, setIsGenerating] = useState(false);
   const [concepts, setConcepts] = useState<TattooConcept[]>([]);
   const [selectedConcept, setSelectedConcept] = useState<TattooConcept | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [historyPanelOpen, setHistoryPanelOpen] = useState(false);
+  const [savedResults, setSavedResults] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('alestudio_results');
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
 
   // Try-On State
   const [bodyImage, setBodyImage] = useState<string | null>(null);
@@ -196,9 +208,12 @@ export default function App() {
     for (let i = 0; i < generatedConcepts.length; i++) {
       try {
         const imageUrl = await generateTattooImage(generatedConcepts[i].technicalPrompt, formData.style);
+        const completedConcept = { ...generatedConcepts[i], imageUrl, isGeneratingImage: false };
         setConcepts(prev => prev.map((c, index) =>
-          index === i ? { ...c, imageUrl, isGeneratingImage: false } : c
+          index === i ? completedConcept : c
         ));
+        // Save to persistent history as soon as image is ready
+        addToHistory(completedConcept);
       } catch (error) {
         console.error(`Error generating image for concept ${i}:`, error);
         setConcepts(prev => prev.map((c, index) =>
@@ -216,8 +231,8 @@ export default function App() {
     try {
       const generatedConcepts = await generateConcepts(formData);
       await generateImagesForConcepts(generatedConcepts);
-      // Add new results to history
-      setDesignHistory(prev => [...generatedConcepts, ...prev]);
+      // Add properly structured entries to history (after image generation)
+      // We read concepts from a ref-like approach after generation
     } catch (error: any) {
       console.error(error);
       const msg = error?.status === 503 || error?.message?.includes('503')
@@ -602,6 +617,7 @@ export default function App() {
     try {
       const finalUrl = await generateFinalTryOn(base64);
       setFinalTryOnImage(finalUrl);
+      saveResult(finalUrl); // persist to localStorage
     } catch (error: any) {
       console.error(error);
       const msg = error?.status === 503 || error?.message?.includes('503')
@@ -614,6 +630,56 @@ export default function App() {
     }
   };
 
+  // Save a concept to history when an image finishes generating
+  const addToHistory = useCallback((concept: TattooConcept) => {
+    if (!concept.imageUrl) return;
+    const entry: DesignHistoryEntry = {
+      id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      timestamp: Date.now(),
+      concept,
+      style: formData.style,
+      bodyPart: formData.bodyPart,
+      meaning: formData.meaning,
+    };
+    setDesignHistory(prev => {
+      const updated = [entry, ...prev].slice(0, 50);
+      try { localStorage.setItem('alestudio_history', JSON.stringify(updated)); } catch { }
+      return updated;
+    });
+  }, [formData.style, formData.bodyPart, formData.meaning]);
+
+  const saveResult = useCallback((imageUrl: string) => {
+    setSavedResults(prev => {
+      const updated = [imageUrl, ...prev].slice(0, 20);
+      try { localStorage.setItem('alestudio_results', JSON.stringify(updated)); } catch { }
+      return updated;
+    });
+  }, []);
+
+  const deleteHistoryEntry = (id: string) => {
+    setDesignHistory(prev => {
+      const updated = prev.filter(e => e.id !== id);
+      try { localStorage.setItem('alestudio_history', JSON.stringify(updated)); } catch { }
+      return updated;
+    });
+  };
+
+  const clearHistory = () => {
+    setDesignHistory([]);
+    try { localStorage.removeItem('alestudio_history'); } catch { }
+  };
+
+  const formatTimeAgo = (timestamp: number) => {
+    const diff = Date.now() - timestamp;
+    const minutes = Math.floor(diff / 60000);
+    const hours = Math.floor(diff / 3600000);
+    const days = Math.floor(diff / 86400000);
+    if (minutes < 1) return 'Ahora mismo';
+    if (minutes < 60) return `Hace ${minutes} min`;
+    if (hours < 24) return `Hace ${hours}h`;
+    return `Hace ${days}d`;
+  };
+
   const navItems = [
     { id: 1, label: 'Crear', icon: Sparkles, enabled: true },
     { id: 3, label: 'Lienzo', icon: Camera, enabled: !!selectedConcept },
@@ -622,95 +688,265 @@ export default function App() {
     { id: 6, label: 'Agendar', icon: Calendar, enabled: true },
   ];
 
+
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-50 font-sans selection:bg-zinc-800 flex flex-col md:flex-row">
       {/* Sidebar - Desktop */}
-      <aside className="hidden md:flex w-72 h-screen sticky top-0 border-r border-zinc-900 bg-zinc-950/50 backdrop-blur-xl flex-col p-6 z-50">
-        <div className="flex items-center gap-3 mb-12 group cursor-pointer" onClick={() => setStep(1)}>
-          <div className="relative">
-            <div className="absolute inset-0 bg-zinc-100 blur-md opacity-20 group-hover:opacity-40 transition-opacity"></div>
-            <Crown className="w-8 h-8 text-zinc-100 relative z-10" />
+      <aside className="hidden md:flex w-72 h-screen sticky top-0 border-r border-zinc-900 bg-zinc-950 flex-col z-50 overflow-hidden">
+        {/* Logo */}
+        <div className="p-6 border-b border-zinc-900">
+          <div className="flex items-center gap-3 group cursor-pointer" onClick={() => setStep(1)}>
+            <div className="relative">
+              <div className="absolute inset-0 bg-zinc-100 blur-md opacity-20 group-hover:opacity-40 transition-opacity"></div>
+              <Crown className="w-7 h-7 text-zinc-100 relative z-10" />
+            </div>
+            <div>
+              <span className="text-base font-black tracking-[0.12em] uppercase bg-gradient-to-r from-zinc-100 to-zinc-400 bg-clip-text text-transparent block leading-none">AL ESTILO</span>
+              <span className="text-[10px] text-zinc-600 tracking-widest uppercase">Tattoo Studio</span>
+            </div>
           </div>
-          <span className="text-lg font-black tracking-[0.1em] uppercase bg-gradient-to-r from-zinc-100 via-zinc-300 to-zinc-500 bg-clip-text text-transparent">
-            AL ESTILO
-          </span>
         </div>
 
-        <nav className="space-y-2 mb-12">
-          {navItems.map((item) => (
-            <button
-              key={item.id}
-              disabled={!item.enabled}
-              onClick={() => setStep(item.id as any)}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${step === item.id
-                ? 'bg-zinc-100 text-zinc-950 font-semibold'
-                : 'text-zinc-500 hover:text-zinc-100 hover:bg-zinc-900/50 disabled:opacity-30 disabled:cursor-not-allowed'
-                }`}
-            >
-              <item.icon className="w-5 h-5" />
-              <span>{item.label}</span>
-            </button>
-          ))}
+        {/* Navigation */}
+        <nav className="px-4 py-4 space-y-1">
+          {navItems.map((item) => {
+            const isActive = step === item.id;
+            const isCompleted = step > item.id;
+            return (
+              <button
+                key={item.id}
+                disabled={!item.enabled}
+                onClick={() => setStep(item.id as any)}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all group ${isActive
+                  ? 'bg-zinc-100 text-zinc-950 font-semibold shadow-lg'
+                  : item.enabled
+                    ? 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900'
+                    : 'text-zinc-700 cursor-not-allowed'
+                  }`}
+              >
+                <item.icon className="w-4 h-4 flex-shrink-0" />
+                <span className="text-sm">{item.label}</span>
+                {isCompleted && !isActive && (
+                  <CheckCircle2 className="w-3.5 h-3.5 text-zinc-600 ml-auto" />
+                )}
+              </button>
+            );
+          })}
         </nav>
 
-        {/* Selected Design Preview in Sidebar */}
-        <div className="mt-auto space-y-6">
-          {selectedConcept && (
-            <div className="bg-zinc-900/30 border border-zinc-800/50 rounded-2xl p-4">
-              <p className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest mb-3">Diseño Actual</p>
-              <div className="aspect-square rounded-lg overflow-hidden border border-zinc-800 mb-3 bg-zinc-950">
-                {selectedConcept.imageUrl && <img src={selectedConcept.imageUrl} className="w-full h-full object-cover" />}
+        {/* Current Design Preview */}
+        <AnimatePresence>
+          {selectedConcept?.imageUrl && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 10 }}
+              className="mx-4 mt-2"
+            >
+              <div
+                className="relative rounded-2xl overflow-hidden border border-zinc-800 cursor-pointer group"
+                onClick={() => step >= 4 ? setStep(4) : setStep(2)}
+              >
+                <img src={selectedConcept.imageUrl} alt={selectedConcept.title} className="w-full aspect-square object-cover" />
+                <div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-transparent to-transparent" />
+                <div className="absolute bottom-0 left-0 right-0 p-3">
+                  <p className="text-xs font-semibold text-zinc-100 truncate">{selectedConcept.title}</p>
+                  <p className="text-[10px] text-zinc-400 truncate">{formData.style}</p>
+                </div>
+                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <span className="bg-zinc-950/80 text-zinc-300 text-[10px] px-2 py-1 rounded-lg backdrop-blur-sm">Activo</span>
+                </div>
               </div>
-              <p className="text-xs font-medium text-zinc-300 truncate">{selectedConcept.title}</p>
-            </div>
+            </motion.div>
           )}
+        </AnimatePresence>
 
-          {designHistory.length > 0 && (
-            <div className="space-y-3">
-              <p className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest px-2">Historial</p>
-              <div className="flex -space-x-2 overflow-hidden px-2 h-10 items-center">
-                {designHistory.slice(0, 5).map((h, i) => (
-                  <button
-                    key={i}
-                    onClick={() => {
-                      if (h.imageUrl) {
-                        setSelectedConcept(h);
-                        if (step < 4 && bodyImage) setStep(4);
-                        else if (step < 2) setStep(2);
-                      }
-                    }}
-                    className="w-8 h-8 rounded-full border-2 border-zinc-950 bg-zinc-900 overflow-hidden hover:scale-110 hover:z-10 transition-transform"
-                  >
-                    {h.imageUrl && <img src={h.imageUrl} className="w-full h-full object-cover" />}
-                  </button>
-                ))}
-                {designHistory.length > 5 && (
-                  <div className="w-8 h-8 rounded-full border-2 border-zinc-950 bg-zinc-800 flex items-center justify-center text-[10px] text-zinc-500">
-                    +{designHistory.length - 5}
-                  </div>
-                )}
-              </div>
+        {/* History Panel */}
+        <div className="flex-1 flex flex-col min-h-0 mt-4">
+          <button
+            onClick={() => setHistoryPanelOpen(v => !v)}
+            className="mx-4 flex items-center justify-between px-3 py-2 rounded-xl hover:bg-zinc-900 transition-colors text-zinc-500 hover:text-zinc-300 group"
+          >
+            <div className="flex items-center gap-2">
+              <Clock className="w-4 h-4" />
+              <span className="text-xs font-semibold uppercase tracking-widest">Historial</span>
+              {designHistory.length > 0 && (
+                <span className="bg-zinc-800 text-zinc-400 text-[10px] w-5 h-5 rounded-full flex items-center justify-center font-bold">
+                  {designHistory.length > 99 ? '99+' : designHistory.length}
+                </span>
+              )}
             </div>
-          )}
+            {historyPanelOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+          </button>
+
+          <AnimatePresence>
+            {historyPanelOpen && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                className="flex-1 flex flex-col min-h-0 overflow-hidden"
+              >
+                {designHistory.length === 0 ? (
+                  <div className="mx-4 mt-2 p-4 rounded-xl border border-dashed border-zinc-800 flex flex-col items-center gap-2 text-zinc-600">
+                    <ImageIcon className="w-6 h-6" />
+                    <p className="text-xs text-center">Tus diseños aparecerán aquí</p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-end px-4 pt-1 pb-1">
+                      <button onClick={clearHistory} className="text-[10px] text-zinc-700 hover:text-red-400 transition-colors flex items-center gap-1">
+                        <Trash2 className="w-3 h-3" /> Limpiar todo
+                      </button>
+                    </div>
+                    <div className="flex-1 overflow-y-auto px-4 pb-4 space-y-2 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-zinc-800">
+                      {designHistory.map((entry) => (
+                        <motion.div
+                          key={entry.id}
+                          initial={{ opacity: 0, x: -10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          className="group flex gap-2.5 p-2 rounded-xl hover:bg-zinc-900 transition-colors cursor-pointer"
+                          onClick={() => {
+                            setSelectedConcept(entry.concept);
+                            if (bodyImage) setStep(4);
+                            else setStep(2);
+                          }}
+                        >
+                          <div className="w-12 h-12 rounded-lg overflow-hidden border border-zinc-800 flex-shrink-0 bg-zinc-950">
+                            {entry.concept.imageUrl
+                              ? <img src={entry.concept.imageUrl} className="w-full h-full object-cover" />
+                              : <div className="w-full h-full flex items-center justify-center text-zinc-700"><ImageIcon className="w-4 h-4" /></div>
+                            }
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-medium text-zinc-200 truncate">{entry.concept.title}</p>
+                            <p className="text-[10px] text-zinc-600 truncate">{entry.style}</p>
+                            <p className="text-[10px] text-zinc-700 flex items-center gap-1 mt-0.5">
+                              <Clock className="w-2.5 h-2.5" />{formatTimeAgo(entry.timestamp)}
+                            </p>
+                          </div>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); deleteHistoryEntry(entry.id); }}
+                            className="opacity-0 group-hover:opacity-100 p-1 text-zinc-600 hover:text-red-400 transition-all flex-shrink-0 self-start"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </motion.div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
+
+        {/* Saved Results */}
+        {savedResults.length > 0 && (
+          <div className="mx-4 mb-4 mt-2">
+            <p className="text-[10px] font-bold text-zinc-700 uppercase tracking-widest mb-2 px-1 flex items-center gap-1.5">
+              <Star className="w-3 h-3" /> Guardados ({savedResults.length})
+            </p>
+            <div className="flex gap-1.5 flex-wrap">
+              {savedResults.slice(0, 4).map((url, i) => (
+                <a key={i} href={url} target="_blank" rel="noopener noreferrer">
+                  <img src={url} className="w-10 h-10 rounded-lg object-cover border border-zinc-800 hover:border-zinc-600 transition-colors" />
+                </a>
+              ))}
+              {savedResults.length > 4 && (
+                <div className="w-10 h-10 rounded-lg border border-zinc-800 bg-zinc-900 flex items-center justify-center text-[10px] text-zinc-600 font-bold">
+                  +{savedResults.length - 4}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </aside>
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-h-screen">
         {/* Mobile Header */}
-        <header className="md:hidden border-b border-zinc-900 bg-zinc-950/50 backdrop-blur-xl sticky top-0 z-50">
-          <div className="px-6 h-16 flex items-center justify-between">
-            <div className="flex items-center gap-2">
+        <header className="md:hidden border-b border-zinc-900 bg-zinc-950/90 backdrop-blur-xl sticky top-0 z-50">
+          <div className="px-4 h-14 flex items-center justify-between">
+            <div className="flex items-center gap-2 cursor-pointer" onClick={() => setStep(1)}>
               <Crown className="w-5 h-5 text-zinc-100" />
-              <span className="text-sm font-black tracking-widest uppercase">AL ESTILO</span>
+              <span className="text-sm font-black tracking-widest uppercase text-zinc-100">AL ESTILO</span>
             </div>
-            <button className="p-2 text-zinc-500 hover:text-zinc-100" onClick={() => {/* Toggle Mobile Menu maybe? or just icons */ }}>
-              <SlidersHorizontal className="w-5 h-5" />
-            </button>
+            <div className="flex items-center gap-2">
+              {selectedConcept?.imageUrl && (
+                <div className="w-8 h-8 rounded-full overflow-hidden border border-zinc-700">
+                  <img src={selectedConcept.imageUrl} className="w-full h-full object-cover" />
+                </div>
+              )}
+              <button
+                onClick={() => setHistoryPanelOpen(v => !v)}
+                className="relative p-2 text-zinc-500 hover:text-zinc-100 transition-colors"
+              >
+                <Clock className="w-5 h-5" />
+                {designHistory.length > 0 && (
+                  <span className="absolute top-1 right-1 w-2 h-2 bg-zinc-100 rounded-full"></span>
+                )}
+              </button>
+            </div>
           </div>
+          {/* Mobile History Drawer */}
+          <AnimatePresence>
+            {historyPanelOpen && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                className="border-t border-zinc-900 bg-zinc-950"
+              >
+                <div className="p-4 max-h-64 overflow-y-auto space-y-2">
+                  {designHistory.length === 0 ? (
+                    <p className="text-xs text-zinc-600 text-center py-4">No hay diseños todavía</p>
+                  ) : (
+                    designHistory.map((entry) => (
+                      <div
+                        key={entry.id}
+                        className="flex gap-3 p-2 rounded-xl hover:bg-zinc-900 transition-colors cursor-pointer"
+                        onClick={() => {
+                          setSelectedConcept(entry.concept);
+                          setHistoryPanelOpen(false);
+                          if (bodyImage) setStep(4); else setStep(2);
+                        }}
+                      >
+                        <div className="w-10 h-10 rounded-lg overflow-hidden border border-zinc-800 flex-shrink-0">
+                          {entry.concept.imageUrl && <img src={entry.concept.imageUrl} className="w-full h-full object-cover" />}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium text-zinc-200 truncate">{entry.concept.title}</p>
+                          <p className="text-[10px] text-zinc-600">{entry.style} · {formatTimeAgo(entry.timestamp)}</p>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </header>
 
-        <main className="flex-1 px-6 py-12 overflow-y-auto">
+        {/* Mobile Bottom Nav */}
+        <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 border-t border-zinc-900 bg-zinc-950/95 backdrop-blur-xl">
+          <div className="flex">
+            {navItems.map((item) => (
+              <button
+                key={item.id}
+                disabled={!item.enabled}
+                onClick={() => setStep(item.id as any)}
+                className={`flex-1 flex flex-col items-center gap-1 py-3 transition-all ${step === item.id ? 'text-zinc-100' : 'text-zinc-600 disabled:opacity-30'
+                  }`}
+              >
+                <item.icon className="w-5 h-5" />
+                <span className="text-[9px] font-medium">{item.label}</span>
+              </button>
+            ))}
+          </div>
+        </nav>
+
+        <main className="flex-1 px-6 py-12 pb-32 md:pb-12 overflow-y-auto">
           {/* Error Banner */}
           <AnimatePresence>
             {errorMessage && (

@@ -13,3 +13,13 @@ export interface TattooConcept {
   isGeneratingImage?: boolean;
   currentStyle?: string;
 }
+
+export interface DesignHistoryEntry {
+  id: string;
+  timestamp: number;
+  concept: TattooConcept;
+  style: string;
+  bodyPart: string;
+  meaning: string;
+  finalImageUrl?: string;
+}
