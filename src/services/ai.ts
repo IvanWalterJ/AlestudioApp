@@ -99,15 +99,45 @@ SUBJECT: ${technicalPrompt}`,
 }
 
 export async function generateFinalTryOn(composedImageBase64: string): Promise<string> {
-  const prompt = `You are a world-class VFX artist and high-end photo retoucher. I am providing a photo where a 2D digital tattoo design has been roughly overlaid onto a person's body.
-Your absolute priority is to make this tattoo look 100% REAL, as if it was inked years ago and has healed perfectly into the skin.
+  const prompt = `You are the world's best photorealistic tattoo retoucher — your work is indistinguishable from real photographs of healed tattoos.
 
-CRITICAL INSTRUCTIONS FOR PHOTOREALISM:
-1. 3D ANATOMY & WARPING: The tattoo MUST wrap around the body's 3D geometry. Curve it around muscles, bones, and cylindrical shapes (like arms/legs). It must not look like a flat sticker.
-2. LIGHTING & SHADOWS: The tattoo ink MUST react to the environment's lighting. Apply the exact same shadows, core shadows, and highlights present on the underlying skin to the tattoo ink.
-3. SKIN TEXTURE & BLENDING: Ink lives UNDER the epidermis. You MUST show skin pores, fine hairs, goosebumps, and specular skin highlights OVER the tattoo. The ink should slightly fade at the microscopic edges (ink bleed).
-4. COLOR MATCHING: If the tattoo is black, it should match the black levels of the photo's shadows, not be pure #000000. Simulate a 'multiply' blend mode effect.
-5. ZERO ALTERATION: DO NOT change the person's face, body, clothing, or background. ONLY process the tattoo area.`;
+I am giving you a photograph of a human body with a digital tattoo design overlaid on the skin. Your job is to transform this into a STUNNING, HYPER-REALISTIC photograph that looks like it was taken by a professional tattoo photographer with a macro lens.
+
+ABSOLUTE REQUIREMENTS — follow every single one:
+
+1. SKIN TEXTURE IS KING:
+   - The tattoo ink sits BENEATH the skin's surface layer (epidermis).
+   - You MUST render visible skin pores, fine body hairs, and natural skin texture ON TOP of the tattoo ink.
+   - Add subtle specular highlights from skin oils that catch light, even over dark ink areas.
+   - Include micro-level ink bleeding at the edges of lines — real tattoos never have perfectly crisp digital edges.
+
+2. 3D ANATOMICAL WRAPPING:
+   - The design MUST conform to the 3D topology of the body — wrap around muscles, follow the curves of bones, stretch over tendons.
+   - Cylindrical body parts (arms, legs) require perspective foreshortening of the design.
+   - The tattoo must feel like it was tattooed directly onto THAT specific body, not pasted on.
+
+3. LIGHTING INTEGRATION:
+   - Match the EXACT lighting environment of the original photo.
+   - Apply cast shadows, ambient occlusion, and specular highlights to the tattoo ink consistently with the rest of the skin.
+   - Dark areas of the body should darken the tattoo proportionally. Lit areas should show more detail.
+
+4. INK REALISM:
+   - Black ink should look like saturated carbon pigment under skin, NOT digital black (#000000).
+   - Color ink (if present) should look slightly muted and warm, as if filtered through a thin layer of skin.
+   - Simulate the subtle "raised" quality of freshly healed tattoos with micro-shadows at ink boundaries.
+   - Fine lines should show slight ink spread. Bold lines should show gradient density from center to edge.
+
+5. PHOTOGRAPHIC QUALITY:
+   - The final result should look like a professional photograph: shallow depth of field, natural bokeh in background.
+   - Maintain the exact same camera angle and focal length as the original image.
+   - Preserve all skin tones, body hair, freckles, and natural imperfections.
+
+6. PRESERVATION:
+   - DO NOT alter the person's face, body shape, clothing, background, or any non-tattoo area.
+   - DO NOT add new elements, tattoos, or modifications beyond what is shown in the overlay.
+   - DO NOT change the composition or cropping of the image.
+
+The result should be so realistic that a tattoo artist would believe it's a real healed tattoo photograph.`;
 
   const response = await ai.models.generateContent({
     model: 'gemini-2.5-flash-image',

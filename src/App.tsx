@@ -610,7 +610,7 @@ export default function App() {
       setErrorMessage(msg);
       setStep(4);
     } finally {
-      setIsGenerating(false);
+      setIsGeneratingFinal(false);
     }
   };
 
