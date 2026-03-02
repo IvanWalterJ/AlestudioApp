@@ -63,6 +63,7 @@ export default function App() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [concepts, setConcepts] = useState<TattooConcept[]>([]);
   const [selectedConcept, setSelectedConcept] = useState<TattooConcept | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Try-On State
   const [bodyImage, setBodyImage] = useState<string | null>(null);
@@ -217,9 +218,12 @@ export default function App() {
       await generateImagesForConcepts(generatedConcepts);
       // Add new results to history
       setDesignHistory(prev => [...generatedConcepts, ...prev]);
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      alert("Hubo un error al generar los conceptos. Por favor, intenta de nuevo.");
+      const msg = error?.status === 503 || error?.message?.includes('503')
+        ? "Hay mucha demanda en la app en este momento. ¡Nuestros artistas digitales están a tope! Por favor, volvé a intentarlo en unos segundos."
+        : "Hubo un problema al conectar con el estudio. Por favor, intenta de nuevo.";
+      setErrorMessage(msg);
       setStep(1);
     } finally {
       setIsGenerating(false);
@@ -239,9 +243,12 @@ export default function App() {
       setConcepts(prev => prev.map((c, i) =>
         i === conceptIndex ? { ...c, imageUrl, isGeneratingImage: false } : c
       ));
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      alert("Error al regenerar el diseño.");
+      const msg = error?.status === 503 || error?.message?.includes('503')
+        ? "IA saturada. Hay muchísima gente diseñando ahora mismo, por favor reintentá en un momento."
+        : "Error al regenerar el diseño.";
+      setErrorMessage(msg);
       setConcepts(prev => prev.map((c, i) =>
         i === conceptIndex ? { ...c, isGeneratingImage: false } : c
       ));
@@ -269,7 +276,7 @@ export default function App() {
       }
     } catch (err) {
       console.error("Error accessing camera:", err);
-      alert("No se pudo acceder a la cámara.");
+      setErrorMessage("No se pudo acceder a la cámara. Asegúrate de dar los permisos necesarios.");
       setIsCameraOpen(false);
     }
   };
@@ -595,17 +602,47 @@ export default function App() {
     try {
       const finalUrl = await generateFinalTryOn(base64);
       setFinalTryOnImage(finalUrl);
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      alert("Error al generar el resultado final realista.");
+      const msg = error?.status === 503 || error?.message?.includes('503')
+        ? "El motor de realismo está saturado por la alta demanda. Intentá aplicarlo de nuevo en unos segundos."
+        : "Error al generar el resultado final realista.";
+      setErrorMessage(msg);
       setStep(4);
     } finally {
-      setIsGeneratingFinal(false);
+      setIsGenerating(false);
     }
   };
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-50 font-sans selection:bg-zinc-800">
+      {/* Error Banner */}
+      <AnimatePresence>
+        {errorMessage && (
+          <motion.div
+            initial={{ opacity: 0, y: -50 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -50 }}
+            className="fixed top-24 left-1/2 -translate-x-1/2 z-[100] w-full max-w-lg px-6"
+          >
+            <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-2xl shadow-2xl backdrop-blur-xl flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-red-950/50 flex items-center justify-center text-red-500">
+                  <RefreshCw className="w-5 h-5 animate-spin-slow" />
+                </div>
+                <p className="text-sm font-medium text-zinc-200">{errorMessage}</p>
+              </div>
+              <button
+                onClick={() => setErrorMessage(null)}
+                className="p-1 hover:bg-zinc-800 rounded-lg transition-colors text-zinc-500 hover:text-zinc-100"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Header */}
       <header className="border-b border-zinc-900 bg-zinc-950/50 backdrop-blur-xl sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
