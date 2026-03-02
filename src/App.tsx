@@ -1,7 +1,7 @@
 // Vercel trigger: update env vars
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 
-import { Loader2, Sparkles, ArrowRight, CheckCircle2, Upload, Camera, X, RefreshCw, SlidersHorizontal, Download, Eraser, Move, Undo, Redo, Calendar, Crown, ArrowLeft, Clock, Trash2, ImageIcon, ChevronDown, ChevronUp, Star } from 'lucide-react';
+import { Loader2, Sparkles, ArrowRight, CheckCircle2, Upload, Camera, X, RefreshCw, SlidersHorizontal, Download, Eraser, Move, Undo, Redo, Calendar, Crown, ArrowLeft, Clock, Trash2, ImageIcon, ChevronDown, ChevronUp, Star, GalleryHorizontal, ZoomIn } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { generateConcepts, generateTattooImage, generateFinalTryOn } from './services/ai';
 import type { TattooFormData, TattooConcept, DesignHistoryEntry } from './types';
@@ -52,7 +52,7 @@ const LoadingInkAnimation = ({ label, subLabel }: { label: string, subLabel?: st
 );
 
 export default function App() {
-  const [step, setStep] = useState<1 | 2 | 3 | 4 | 5 | 6>(1);
+  const [step, setStep] = useState<1 | 2 | 3 | 4 | 5 | 6 | 7>(1);
   const [formData, setFormData] = useState<TattooFormData>({
     style: 'Blackwork',
     meaning: '',
@@ -375,6 +375,8 @@ export default function App() {
     // 1. Draw Tattoo Image
     if (tattooImageRef.current) {
       ctx.save();
+      // Use multiply blend mode so tattoo is invisible on bright backgrounds
+      ctx.globalCompositeOperation = 'multiply';
       ctx.translate(canvas.width / 2 + tattooPos.x, canvas.height / 2 + tattooPos.y);
       ctx.rotate((tattooRotation * Math.PI) / 180);
       ctx.scale(tattooScale, tattooScale);
@@ -686,6 +688,7 @@ export default function App() {
     { id: 4, label: 'Estudio', icon: SlidersHorizontal, enabled: !!bodyImage && !!selectedConcept },
     { id: 5, label: 'Resultados', icon: CheckCircle2, enabled: !!finalTryOnImage },
     { id: 6, label: 'Agendar', icon: Calendar, enabled: true },
+    { id: 7, label: 'Galería', icon: GalleryHorizontal, enabled: savedResults.length > 0 },
   ];
 
 
@@ -779,87 +782,80 @@ export default function App() {
             {historyPanelOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
           </button>
 
-          <AnimatePresence>
-            {historyPanelOpen && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                exit={{ opacity: 0, height: 0 }}
-                className="flex-1 flex flex-col min-h-0 overflow-hidden"
-              >
-                {designHistory.length === 0 ? (
-                  <div className="mx-4 mt-2 p-4 rounded-xl border border-dashed border-zinc-800 flex flex-col items-center gap-2 text-zinc-600">
-                    <ImageIcon className="w-6 h-6" />
-                    <p className="text-xs text-center">Tus diseños aparecerán aquí</p>
-                  </div>
-                ) : (
-                  <>
-                    <div className="flex items-center justify-end px-4 pt-1 pb-1">
-                      <button onClick={clearHistory} className="text-[10px] text-zinc-700 hover:text-red-400 transition-colors flex items-center gap-1">
-                        <Trash2 className="w-3 h-3" /> Limpiar todo
+          <div
+            className={`flex-1 flex flex-col min-h-0 overflow-hidden transition-all duration-300 ${historyPanelOpen ? 'opacity-100 max-h-[600px]' : 'opacity-0 max-h-0'
+              }`}
+          >
+            {designHistory.length === 0 ? (
+              <div className="mx-4 mt-2 p-4 rounded-xl border border-dashed border-zinc-800 flex flex-col items-center gap-2 text-zinc-600">
+                <ImageIcon className="w-6 h-6" />
+                <p className="text-xs text-center">Tus diseños aparecerán aquí</p>
+              </div>
+            ) : (
+              <>
+                <div className="flex items-center justify-end px-4 pt-1 pb-1">
+                  <button onClick={clearHistory} className="text-[10px] text-zinc-700 hover:text-red-400 transition-colors flex items-center gap-1">
+                    <Trash2 className="w-3 h-3" /> Limpiar todo
+                  </button>
+                </div>
+                <div className="flex-1 overflow-y-auto px-4 pb-4 space-y-2">
+                  {designHistory.map((entry) => (
+                    <div
+                      key={entry.id}
+                      className="group flex gap-2.5 p-2 rounded-xl hover:bg-zinc-900 transition-colors cursor-pointer"
+                      onClick={() => {
+                        setSelectedConcept(entry.concept);
+                        if (bodyImage) setStep(4);
+                        else setStep(2);
+                      }}
+                    >
+                      <div className="w-12 h-12 rounded-lg overflow-hidden border border-zinc-800 flex-shrink-0 bg-zinc-950">
+                        {entry.concept.imageUrl
+                          ? <img src={entry.concept.imageUrl} className="w-full h-full object-cover" />
+                          : <div className="w-full h-full flex items-center justify-center text-zinc-700"><ImageIcon className="w-4 h-4" /></div>
+                        }
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-medium text-zinc-200 truncate">{entry.concept.title}</p>
+                        <p className="text-[10px] text-zinc-600 truncate">{entry.style}</p>
+                        <p className="text-[10px] text-zinc-700 flex items-center gap-1 mt-0.5">
+                          <Clock className="w-2.5 h-2.5" />{formatTimeAgo(entry.timestamp)}
+                        </p>
+                      </div>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); deleteHistoryEntry(entry.id); }}
+                        className="opacity-0 group-hover:opacity-100 p-1 text-zinc-600 hover:text-red-400 transition-all flex-shrink-0 self-start"
+                      >
+                        <X className="w-3.5 h-3.5" />
                       </button>
                     </div>
-                    <div className="flex-1 overflow-y-auto px-4 pb-4 space-y-2 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-zinc-800">
-                      {designHistory.map((entry) => (
-                        <motion.div
-                          key={entry.id}
-                          initial={{ opacity: 0, x: -10 }}
-                          animate={{ opacity: 1, x: 0 }}
-                          className="group flex gap-2.5 p-2 rounded-xl hover:bg-zinc-900 transition-colors cursor-pointer"
-                          onClick={() => {
-                            setSelectedConcept(entry.concept);
-                            if (bodyImage) setStep(4);
-                            else setStep(2);
-                          }}
-                        >
-                          <div className="w-12 h-12 rounded-lg overflow-hidden border border-zinc-800 flex-shrink-0 bg-zinc-950">
-                            {entry.concept.imageUrl
-                              ? <img src={entry.concept.imageUrl} className="w-full h-full object-cover" />
-                              : <div className="w-full h-full flex items-center justify-center text-zinc-700"><ImageIcon className="w-4 h-4" /></div>
-                            }
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-xs font-medium text-zinc-200 truncate">{entry.concept.title}</p>
-                            <p className="text-[10px] text-zinc-600 truncate">{entry.style}</p>
-                            <p className="text-[10px] text-zinc-700 flex items-center gap-1 mt-0.5">
-                              <Clock className="w-2.5 h-2.5" />{formatTimeAgo(entry.timestamp)}
-                            </p>
-                          </div>
-                          <button
-                            onClick={(e) => { e.stopPropagation(); deleteHistoryEntry(entry.id); }}
-                            className="opacity-0 group-hover:opacity-100 p-1 text-zinc-600 hover:text-red-400 transition-all flex-shrink-0 self-start"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                          </button>
-                        </motion.div>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </motion.div>
+                  ))}
+                </div>
+              </>
             )}
-          </AnimatePresence>
+          </div>
         </div>
 
-        {/* Saved Results */}
+        {/* Gallery Link */}
         {savedResults.length > 0 && (
-          <div className="mx-4 mb-4 mt-2">
-            <p className="text-[10px] font-bold text-zinc-700 uppercase tracking-widest mb-2 px-1 flex items-center gap-1.5">
-              <Star className="w-3 h-3" /> Guardados ({savedResults.length})
-            </p>
-            <div className="flex gap-1.5 flex-wrap">
-              {savedResults.slice(0, 4).map((url, i) => (
-                <a key={i} href={url} target="_blank" rel="noopener noreferrer">
-                  <img src={url} className="w-10 h-10 rounded-lg object-cover border border-zinc-800 hover:border-zinc-600 transition-colors" />
-                </a>
+          <button
+            onClick={() => setStep(7 as any)}
+            className="mx-4 mb-4 flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-zinc-900 transition-colors group"
+          >
+            <div className="flex -space-x-2">
+              {savedResults.slice(0, 3).map((url, i) => (
+                <img key={i} src={url} className="w-8 h-8 rounded-full object-cover border-2 border-zinc-950" />
               ))}
-              {savedResults.length > 4 && (
-                <div className="w-10 h-10 rounded-lg border border-zinc-800 bg-zinc-900 flex items-center justify-center text-[10px] text-zinc-600 font-bold">
-                  +{savedResults.length - 4}
-                </div>
-              )}
             </div>
-          </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-semibold text-zinc-300 flex items-center gap-1.5">
+                <Star className="w-3 h-3 text-zinc-500" />
+                Mi Galería
+              </p>
+              <p className="text-[10px] text-zinc-600">{savedResults.length} resultado{savedResults.length !== 1 ? 's' : ''} guardado{savedResults.length !== 1 ? 's' : ''}</p>
+            </div>
+            <ChevronDown className="w-3.5 h-3.5 text-zinc-600 -rotate-90" />
+          </button>
         )}
       </aside>
 
@@ -1274,7 +1270,7 @@ export default function App() {
                         />
                       )}
 
-                      {/* 2. Interactive Tattoo Canvas (Multiply) */}
+                      {/* 2. Interactive Tattoo Canvas - mix-blend-multiply clips ink to body naturally */}
                       <canvas
                         ref={canvasRef}
                         className={`absolute inset-0 w-full h-full mix-blend-multiply ${studioMode === 'move' ? 'cursor-move' : 'cursor-crosshair'}`}
@@ -1453,20 +1449,19 @@ export default function App() {
                           <div className="flex items-center gap-2 mb-4 text-xs font-semibold text-zinc-500 uppercase tracking-widest">
                             <RefreshCw className="w-3 h-3" /> Historial de Diseños
                           </div>
-                          <div className="grid grid-cols-3 gap-2 max-h-40 overflow-y-auto pr-2 custom-scrollbar">
-                            {designHistory.map((h, i) => (
+                          <div className="grid grid-cols-3 gap-2 max-h-40 overflow-y-auto pr-2">
+                            {designHistory.map((entry, i) => (
                               <button
-                                key={i}
+                                key={entry.id || i}
                                 onClick={() => {
-                                  if (h.imageUrl) {
-                                    setSelectedConcept(h);
-                                    // This will trigger the Step 4 re-init in useEffect
+                                  if (entry.concept.imageUrl) {
+                                    setSelectedConcept(entry.concept);
                                   }
                                 }}
-                                className={`aspect-square rounded-lg border-2 overflow-hidden transition-all ${selectedConcept?.imageUrl === h.imageUrl ? 'border-zinc-100 scale-95' : 'border-zinc-800 hover:border-zinc-600'}`}
+                                className={`aspect-square rounded-lg border-2 overflow-hidden transition-all ${selectedConcept?.imageUrl === entry.concept.imageUrl ? 'border-zinc-100 scale-95' : 'border-zinc-800 hover:border-zinc-600'}`}
                               >
-                                {h.imageUrl ? (
-                                  <img src={h.imageUrl} className="w-full h-full object-cover" />
+                                {entry.concept.imageUrl ? (
+                                  <img src={entry.concept.imageUrl} className="w-full h-full object-cover" />
                                 ) : (
                                   <div className="w-full h-full bg-zinc-900 animate-pulse" />
                                 )}
@@ -1475,6 +1470,7 @@ export default function App() {
                           </div>
                         </div>
                       )}
+
 
                       <button
                         onClick={handleDownload}
@@ -1611,6 +1607,120 @@ export default function App() {
                     title="Agendar Sesión"
                   ></iframe>
                 </div>
+              </motion.div>
+            )}
+            {/* Step 7: Gallery */}
+            {step === 7 && (
+              <motion.div
+                key="step7"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                transition={{ duration: 0.4 }}
+                className="max-w-5xl mx-auto"
+              >
+                <div className="flex flex-col md:flex-row md:items-center justify-between mb-10 gap-4">
+                  <div>
+                    <h1 className="text-4xl font-light tracking-tight mb-2">Mi Galería.</h1>
+                    <p className="text-zinc-400">{savedResults.length} resultado{savedResults.length !== 1 ? 's' : ''} con IA guardado{savedResults.length !== 1 ? 's' : ''}.</p>
+                  </div>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => {
+                        setSavedResults([]);
+                        try { localStorage.removeItem('alestudio_results'); } catch { }
+                      }}
+                      className="flex items-center gap-2 text-sm text-zinc-500 hover:text-red-400 bg-zinc-900/50 px-4 py-2 rounded-full border border-zinc-800 transition-colors"
+                    >
+                      <Trash2 className="w-4 h-4" /> Limpiar galería
+                    </button>
+                    <button
+                      onClick={() => setStep(5)}
+                      className="flex items-center gap-2 text-sm font-medium text-zinc-400 hover:text-zinc-100 bg-zinc-900/50 hover:bg-zinc-800 px-4 py-2 rounded-full border border-zinc-800/50 transition-all"
+                    >
+                      <ArrowLeft className="w-4 h-4" /> Volver
+                    </button>
+                  </div>
+                </div>
+
+                {savedResults.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-32 gap-6 text-zinc-600">
+                    <GalleryHorizontal className="w-16 h-16" />
+                    <p className="text-lg">Todavía no hay resultados guardados</p>
+                    <button onClick={() => setStep(1)} className="bg-zinc-900 text-zinc-300 px-6 py-3 rounded-xl hover:bg-zinc-800 transition-colors">
+                      Crear un tatuaje
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    {/* Featured — most recent */}
+                    <div className="mb-8 relative rounded-3xl overflow-hidden border border-zinc-800/50 group">
+                      <img
+                        src={savedResults[0]}
+                        alt="Resultado más reciente"
+                        className="w-full max-h-[60vh] object-contain bg-zinc-900"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                      <div className="absolute bottom-0 left-0 right-0 p-6 opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-between">
+                        <div>
+                          <p className="text-xs text-zinc-400 uppercase tracking-widest mb-1">Último resultado</p>
+                          <p className="text-lg font-light text-zinc-100">Diseño con IA</p>
+                        </div>
+                        <button
+                          onClick={() => {
+                            const link = document.createElement('a');
+                            link.download = 'tattoo-ai-result-1.jpg';
+                            link.href = savedResults[0];
+                            link.click();
+                          }}
+                          className="bg-zinc-100 text-zinc-950 px-5 py-2.5 rounded-xl font-medium flex items-center gap-2 hover:bg-white transition-colors"
+                        >
+                          <Download className="w-4 h-4" /> Descargar
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Grid of remaining results */}
+                    {savedResults.length > 1 && (
+                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                        {savedResults.slice(1).map((url, i) => {
+                          const idx = i + 1;
+                          return (
+                            <div key={idx} className="relative group rounded-2xl overflow-hidden border border-zinc-800/50 aspect-square bg-zinc-900">
+                              <img src={url} alt={`Resultado ${idx + 1}`} className="w-full h-full object-cover" />
+                              <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-3">
+                                <ZoomIn className="w-6 h-6 text-zinc-200" />
+                                <button
+                                  onClick={() => {
+                                    const link = document.createElement('a');
+                                    link.download = `tattoo-ai-result-${idx + 1}.jpg`;
+                                    link.href = url;
+                                    link.click();
+                                  }}
+                                  className="bg-zinc-100 text-zinc-950 text-xs px-4 py-2 rounded-lg font-medium flex items-center gap-1.5 hover:bg-white transition-colors"
+                                >
+                                  <Download className="w-3.5 h-3.5" /> Descargar
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setSavedResults(prev => {
+                                      const updated = prev.filter((_, j) => j !== idx);
+                                      try { localStorage.setItem('alestudio_results', JSON.stringify(updated)); } catch { }
+                                      return updated;
+                                    });
+                                  }}
+                                  className="text-red-400 text-xs flex items-center gap-1 hover:text-red-300 transition-colors"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" /> Eliminar
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </>
+                )}
               </motion.div>
             )}
           </AnimatePresence>
