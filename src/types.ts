@@ -2,7 +2,7 @@ export interface TattooFormData {
   style: string;
   meaning: string;
   bodyPart: string;
-  size: string;
+  referenceImage: string | null;
 }
 
 export interface TattooConcept {

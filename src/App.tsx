@@ -57,8 +57,9 @@ export default function App() {
     style: 'Blackwork',
     meaning: '',
     bodyPart: 'Antebrazo',
-    size: 'Mediano (10-15cm)'
+    referenceImage: null
   });
+  const [designHistory, setDesignHistory] = useState<TattooConcept[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [concepts, setConcepts] = useState<TattooConcept[]>([]);
   const [selectedConcept, setSelectedConcept] = useState<TattooConcept | null>(null);
@@ -113,6 +114,8 @@ export default function App() {
       opacity: tattooOpacity,
       strokes: eraserStrokes
     };
+    // Force draw after state updates
+    drawCanvas();
   }, [tattooPos, tattooScale, tattooRotation, tattooOpacity, eraserStrokes]);
 
   useEffect(() => {
@@ -212,6 +215,8 @@ export default function App() {
     try {
       const generatedConcepts = await generateConcepts(formData);
       await generateImagesForConcepts(generatedConcepts);
+      // Add new results to history
+      setDesignHistory(prev => [...generatedConcepts, ...prev]);
     } catch (error) {
       console.error(error);
       alert("Hubo un error al generar los conceptos. Por favor, intenta de nuevo.");
@@ -311,8 +316,16 @@ export default function App() {
     });
 
     resizeObserver.observe(container);
+
+    // Immediate draw on enter step 4
+    if (step === 4) {
+      setTimeout(() => {
+        drawCanvas();
+      }, 50);
+    }
+
     return () => resizeObserver.disconnect();
-  }, [step]);
+  }, [step, tattooImageLoaded]);
 
   useEffect(() => {
     // Small delay to ensure container dimensions are set before drawing
@@ -695,29 +708,47 @@ export default function App() {
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-6">
-                  <div className="space-y-3">
-                    <label className="text-sm font-medium text-zinc-300 uppercase tracking-wider">Parte del Cuerpo</label>
-                    <input
-                      type="text"
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-4 text-zinc-100 focus:ring-2 focus:ring-zinc-700 focus:border-transparent outline-none transition-all"
-                      placeholder="Ej: Antebrazo"
-                      value={formData.bodyPart}
-                      onChange={e => setFormData({ ...formData, bodyPart: e.target.value })}
-                    />
-                  </div>
-                  <div className="space-y-3">
-                    <label className="text-sm font-medium text-zinc-300 uppercase tracking-wider">Tamaño</label>
-                    <select
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-4 text-zinc-100 focus:ring-2 focus:ring-zinc-700 focus:border-transparent outline-none transition-all appearance-none"
-                      value={formData.size}
-                      onChange={e => setFormData({ ...formData, size: e.target.value })}
-                    >
-                      <option>Pequeño (1-5cm)</option>
-                      <option>Mediano (10-15cm)</option>
-                      <option>Grande (20cm+)</option>
-                      <option>Manga completa</option>
-                    </select>
+                <div className="space-y-3">
+                  <label className="text-sm font-medium text-zinc-300 uppercase tracking-wider">Parte del Cuerpo</label>
+                  <input
+                    type="text"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-4 text-zinc-100 focus:ring-2 focus:ring-zinc-700 focus:border-transparent outline-none transition-all"
+                    placeholder="Ej: Antebrazo"
+                    value={formData.bodyPart}
+                    onChange={e => setFormData({ ...formData, bodyPart: e.target.value })}
+                  />
+                </div>
+
+                <div className="space-y-3">
+                  <label className="text-sm font-medium text-zinc-300 uppercase tracking-wider">Foto de Referencia (Opcional)</label>
+                  <div className="flex gap-4 items-center">
+                    <label className="flex-1 bg-zinc-950 border border-zinc-800 border-dashed rounded-xl p-8 flex flex-col items-center justify-center gap-2 hover:bg-zinc-900/50 transition-colors cursor-pointer text-zinc-500">
+                      {formData.referenceImage ? (
+                        <img src={formData.referenceImage} className="w-20 h-20 object-cover rounded-lg border border-zinc-800" />
+                      ) : (
+                        <>
+                          <Upload className="w-8 h-8" />
+                          <span className="text-xs">Subir referencia</span>
+                        </>
+                      )}
+                      <input type="file" accept="image/*" className="hidden" onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          const reader = new FileReader();
+                          reader.onload = (ev) => setFormData({ ...formData, referenceImage: ev.target?.result as string });
+                          reader.readAsDataURL(file);
+                        }
+                      }} />
+                    </label>
+                    {formData.referenceImage && (
+                      <button
+                        type="button"
+                        onClick={() => setFormData({ ...formData, referenceImage: null })}
+                        className="p-2 text-zinc-500 hover:text-red-400"
+                      >
+                        <X className="w-5 h-5" />
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -1087,6 +1118,35 @@ export default function App() {
                   </div>
 
                   <div className="flex flex-col gap-3 mt-auto">
+                    {/* Design History Section */}
+                    {designHistory.length > 0 && (
+                      <div className="bg-zinc-900/30 border border-zinc-800/50 rounded-2xl p-4 mb-4">
+                        <div className="flex items-center gap-2 mb-4 text-xs font-semibold text-zinc-500 uppercase tracking-widest">
+                          <RefreshCw className="w-3 h-3" /> Historial de Diseños
+                        </div>
+                        <div className="grid grid-cols-3 gap-2 max-h-40 overflow-y-auto pr-2 custom-scrollbar">
+                          {designHistory.map((h, i) => (
+                            <button
+                              key={i}
+                              onClick={() => {
+                                if (h.imageUrl) {
+                                  setSelectedConcept(h);
+                                  // This will trigger the Step 4 re-init in useEffect
+                                }
+                              }}
+                              className={`aspect-square rounded-lg border-2 overflow-hidden transition-all ${selectedConcept?.imageUrl === h.imageUrl ? 'border-zinc-100 scale-95' : 'border-zinc-800 hover:border-zinc-600'}`}
+                            >
+                              {h.imageUrl ? (
+                                <img src={h.imageUrl} className="w-full h-full object-cover" />
+                              ) : (
+                                <div className="w-full h-full bg-zinc-900 animate-pulse" />
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
                     <button
                       onClick={handleDownload}
                       className="w-full bg-zinc-800 text-zinc-100 font-medium rounded-xl p-4 flex items-center justify-center gap-2 hover:bg-zinc-700 transition-colors"
@@ -1180,7 +1240,7 @@ export default function App() {
                       setTattooScale(1);
                       setTattooRotation(0);
                       setEraserStrokes([]);
-                      setFormData({ ...formData, meaning: '' });
+                      setFormData({ style: 'Blackwork', meaning: '', bodyPart: 'Antebrazo', referenceImage: null });
                     }}
                     className="bg-zinc-800 text-zinc-100 font-medium rounded-xl px-8 py-4 flex items-center justify-center gap-2 hover:bg-zinc-700 transition-colors"
                   >

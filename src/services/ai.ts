@@ -5,22 +5,42 @@ import { TattooFormData, TattooConcept } from "../types";
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 export async function generateConcepts(data: TattooFormData): Promise<TattooConcept[]> {
+  const referenceContext = data.referenceImage
+    ? "The client has provided a reference image to guide the style and composition."
+    : "";
+
   const prompt = `You are a master tattoo artist and creative director.
 A client wants a tattoo with the following details:
 - Style: ${data.style}
 - Meaning/Story: ${data.meaning}
 - Body Part: ${data.bodyPart}
-- Size: ${data.size}
+${referenceContext}
 
-Generate 3 unique, highly creative tattoo concepts.
+Generate 3 unique, highly creative tattoo concepts that are STUNNING and IMPACTFUL.
 For each concept, provide:
 1. A catchy title.
 2. A narrative explaining the design and how it connects to their story (in Spanish, as the user is speaking Spanish).
-3. A technical prompt that will be used to generate the raw flash design (black and white, clean lines, high contrast, pure white background).`;
+3. A technical prompt for a high-end image generation model. 
+   THE TECHNICAL PROMPT MUST SPECIFY:
+   - Pure, hospital-white background (CRITICAL for clean assets).
+   - Crisp, high-contrast black ink (unless the style is specifically color).
+   - Artistic, professional composition (e.g., 'masterpiece', 'intricate details', 'sharp focus').
+   - Specific motifs that make the design feel premium and state-of-the-art.
+   - NO SKIN, NO BACKGROUND NOISE, NO HUMANS. JUST THE TATTOO DESIGN ON WHITE.`;
+
+  const parts: any[] = [{ text: prompt }];
+  if (data.referenceImage) {
+    parts.push({
+      inlineData: {
+        data: data.referenceImage.split(',')[1],
+        mimeType: data.referenceImage.split(';')[0].split(':')[1],
+      }
+    });
+  }
 
   const response = await ai.models.generateContent({
     model: "gemini-3-flash-preview",
-    contents: prompt,
+    contents: { parts },
     config: {
       responseMimeType: "application/json",
       responseSchema: {
@@ -48,13 +68,17 @@ For each concept, provide:
 
 export async function generateTattooImage(technicalPrompt: string, style?: string): Promise<string> {
   const styleInstruction = style ? ` MUST BE STRICTLY IN ${style.toUpperCase()} TATTOO STYLE.` : '';
-  
+
   const response = await ai.models.generateContent({
     model: 'gemini-2.5-flash-image',
     contents: {
       parts: [
         {
-          text: `A raw flash tattoo design on a pure white background. Clean lines, high contrast.${styleInstruction} DESIGN: ${technicalPrompt}`,
+          text: `A professional, high-impact tattoo flash design. Masterpiece quality.
+SHARP FOCUS, CLEAN LINES, ULTRA-HIGH DETAIL.
+BACKGROUND: PURE SOLID WHITE (#FFFFFF). No shadows, no gradients on background.
+STYLE: ${style ? style.toUpperCase() : 'ARTISTIC'}.
+SUBJECT: ${technicalPrompt}`,
         },
       ],
     },
@@ -70,7 +94,7 @@ export async function generateTattooImage(technicalPrompt: string, style?: strin
       return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
     }
   }
-  
+
   throw new Error("No image generated");
 }
 
@@ -107,6 +131,6 @@ CRITICAL INSTRUCTIONS FOR PHOTOREALISM:
       return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
     }
   }
-  
+
   throw new Error("No image generated");
 }
