@@ -5,26 +5,25 @@ import { TattooFormData, TattooConcept } from "../types";
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 /**
- * We use a wide range of model IDs because the user seems to be in a special preview
- * with access to Gemini 3 and Imagen 4. We include standard and preview IDs.
+ * ULTRA-ROBUST MODEL LIST
+ * Targeted at users with specific previews (Nano Banana, Gemini 3.1, etc.)
  */
 const MODELS = {
   TEXT: [
+    "gemini-2.0-flash-exp", // Priority: Experimental version often has separate quota
     "gemini-2.0-flash",
-    "gemini-2.0-flash-exp",
-    "gemini-3.1-flash",
-    "gemini-3.0-flash",
+    "gemini-2.0-flash-001",
     "gemini-1.5-flash-latest",
     "gemini-1.5-flash",
-    "gemini-1.5-pro-latest",
-    "gemini-2.0-pro-exp",
-    "gemini-3-pro"
+    "gemini-1.5-pro-latest"
   ],
   IMAGE: [
     "imagen-3.0-generate-001",
-    "imagen-3.0-flash-001",
-    "imagen-4.0-generate-001",
-    "gemini-2.0-flash" // Gemini 2.0 can also generate images in some regions/configs
+    "imagen-3.0-fast-generate-001",
+    "imagen-3.0-capability-001",
+    "gemini-2.0-flash-exp", // Gemini 2.0 EXP is very strong for image gen
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-001"
   ]
 };
 
@@ -32,32 +31,27 @@ const MODELS = {
  * Enhanced waterfall helper to try multiple models in sequence
  */
 async function generateWithWaterfall(options: any, modelList: string[]) {
-  console.log("Starting waterfall with models:", modelList);
   let lastError: any = null;
 
   for (const modelName of modelList) {
     try {
       console.log(`[Waterfall] Trying model: ${modelName}`);
-      const result = await ai.models.generateContent({
+      return await ai.models.generateContent({
         ...options,
         model: modelName
       });
-      console.log(`[Waterfall] Success with model: ${modelName}`);
-      return result;
     } catch (error: any) {
       lastError = error;
-      const status = error.status || (error.response?.status);
+      const status = error.status || error.response?.status;
       const message = error.message || "";
 
-      console.warn(`[Waterfall] Model ${modelName} failed (Status: ${status}). Message: ${message}`);
+      console.warn(`[Waterfall] ${modelName} failed. Status: ${status}. Message: ${message.substring(0, 100)}...`);
 
-      // We continue for almost any retryable error (Quota, Not Found, Server Error)
-      // and even for "Not Found" because availability varies by project/region.
+      // If we are at the end of the list and everything failed, we'll throw the last error
       continue;
     }
   }
 
-  console.error("[Waterfall] CRITICAL: All models failed.", lastError);
   throw lastError;
 }
 
