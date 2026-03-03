@@ -5,33 +5,43 @@ import { TattooFormData, TattooConcept } from "../types";
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 const MODELS = {
-  PRIMARY: "gemini-2.0-flash",
-  BACKUP: "gemini-1.5-flash",
-  IMAGE: "imagen-3.0-generate-001"
+  TEXT_PRIMARY: "gemini-2.0-flash",
+  TEXT_BACKUP: "gemini-1.5-flash",
+  IMAGE_PRIMARY: "imagen-3.0-generate-001",
+  IMAGE_BACKUP: "gemini-2.0-flash"
 };
 
 /**
  * Generic waterfall helper to retry with backup model if primary fails
  */
-async function generateWithWaterfall(options: any) {
+async function generateWithWaterfall(options: any, isImage: boolean = false) {
+  const primaryModel = isImage ? MODELS.IMAGE_PRIMARY : MODELS.TEXT_PRIMARY;
+  const backupModel = isImage ? MODELS.IMAGE_BACKUP : MODELS.TEXT_BACKUP;
+
   try {
-    // Try Primary Model (2.0-flash)
+    // Try Primary Model
     return await ai.models.generateContent({
       ...options,
-      model: MODELS.PRIMARY
+      model: primaryModel
     });
   } catch (error: any) {
-    console.warn(`Primary model (${MODELS.PRIMARY}) failed or saturated. Falling back to ${MODELS.BACKUP}...`, error);
+    console.warn(`${isImage ? 'Image' : 'Text'} primary model (${primaryModel}) failed. Falling back to ${backupModel}...`, error);
 
-    // Check if it's a "quota" or "overloaded" error (standard 429/503)
-    // Even if not, we fallback to ensure service continuity as requested.
     try {
       return await ai.models.generateContent({
         ...options,
-        model: MODELS.BACKUP
+        model: backupModel
       });
-    } catch (backupError) {
-      console.error("Critical: Both primary and backup models failed.", backupError);
+    } catch (backupError: any) {
+      // Final fallback to 1.5-flash if everything else fails
+      if (backupModel !== MODELS.TEXT_BACKUP) {
+        console.warn(`Backup model (${backupModel}) also failed. Final fallback to ${MODELS.TEXT_BACKUP}...`, backupError);
+        return await ai.models.generateContent({
+          ...options,
+          model: MODELS.TEXT_BACKUP
+        });
+      }
+      console.error("Critical: All AI models failed.", backupError);
       throw backupError;
     }
   }
@@ -97,10 +107,7 @@ For each concept, provide:
 }
 
 export async function generateTattooImage(technicalPrompt: string, style?: string): Promise<string> {
-  // Image generation doesn't support the same waterfall logic as text (models are different)
-  // But we use the requested Imagen 3.0 model.
-  const response = await ai.models.generateContent({
-    model: MODELS.IMAGE,
+  const options = {
     contents: {
       parts: [
         {
@@ -115,7 +122,9 @@ BACKGROUND: PURE SOLID WHITE (#FFFFFF). NO SKIN. MASTERPIECE QUALITY.`,
         aspectRatio: "1:1",
       }
     }
-  });
+  };
+
+  const response = await generateWithWaterfall(options, true);
 
   for (const part of response.candidates?.[0]?.content?.parts || []) {
     if (part.inlineData) {
@@ -131,10 +140,7 @@ export async function generateFinalTryOn(composedImageBase64: string): Promise<s
 Ink must look sub-dermal, follow skin texture, pores, and anatomical curvature perfectly. 
 Match original lighting. Preserve all skin details.`;
 
-  // Try-on is image-to-image, usually Imagen supports this via specific models or Gemini 2.0 Flash Vision
-  // We use the image model requested.
-  const response = await ai.models.generateContent({
-    model: MODELS.IMAGE,
+  const options = {
     contents: {
       parts: [
         {
@@ -148,7 +154,9 @@ Match original lighting. Preserve all skin details.`;
         },
       ],
     }
-  });
+  };
+
+  const response = await generateWithWaterfall(options, true);
 
   for (const part of response.candidates?.[0]?.content?.parts || []) {
     if (part.inlineData) {
