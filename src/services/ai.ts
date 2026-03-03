@@ -4,43 +4,60 @@ import { TattooFormData, TattooConcept } from "../types";
 // Initialize the Gemini API client
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
+/**
+ * We use a wide range of model IDs because the user seems to be in a special preview
+ * with access to Gemini 3 and Imagen 4. We include standard and preview IDs.
+ */
 const MODELS = {
-  TEXT: ["gemini-2.0-flash", "gemini-1.5-flash-latest", "gemini-1.5-flash", "gemini-1.5-pro-latest"],
-  IMAGE: ["imagen-3.0-generate-001", "gemini-2.0-flash"]
+  TEXT: [
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-exp",
+    "gemini-3.1-flash",
+    "gemini-3.0-flash",
+    "gemini-1.5-flash-latest",
+    "gemini-1.5-flash",
+    "gemini-1.5-pro-latest",
+    "gemini-2.0-pro-exp",
+    "gemini-3-pro"
+  ],
+  IMAGE: [
+    "imagen-3.0-generate-001",
+    "imagen-3.0-flash-001",
+    "imagen-4.0-generate-001",
+    "gemini-2.0-flash" // Gemini 2.0 can also generate images in some regions/configs
+  ]
 };
 
 /**
  * Enhanced waterfall helper to try multiple models in sequence
  */
 async function generateWithWaterfall(options: any, modelList: string[]) {
+  console.log("Starting waterfall with models:", modelList);
   let lastError: any = null;
 
   for (const modelName of modelList) {
     try {
-      console.log(`Trying model: ${modelName}`);
-      return await ai.models.generateContent({
+      console.log(`[Waterfall] Trying model: ${modelName}`);
+      const result = await ai.models.generateContent({
         ...options,
         model: modelName
       });
+      console.log(`[Waterfall] Success with model: ${modelName}`);
+      return result;
     } catch (error: any) {
       lastError = error;
       const status = error.status || (error.response?.status);
       const message = error.message || "";
 
-      console.warn(`Model ${modelName} failed (Status: ${status}). Message: ${message}`);
+      console.warn(`[Waterfall] Model ${modelName} failed (Status: ${status}). Message: ${message}`);
 
-      // If it's a 404 (Not Found) or 429 (Rate Limit/Exhausted) or 503 (Overloaded), try next model
-      if (status === 404 || status === 429 || status === 503 || message.includes("not found") || message.includes("exhausted")) {
-        continue;
-      }
-
-      // For other critical errors, we might want to throw immediately, 
-      // but let's be safe and try the next one anyway to ensure service.
+      // We continue for almost any retryable error (Quota, Not Found, Server Error)
+      // and even for "Not Found" because availability varies by project/region.
       continue;
     }
   }
 
-  console.error("Critical: All models in waterfall failed.", lastError);
+  console.error("[Waterfall] CRITICAL: All models failed.", lastError);
   throw lastError;
 }
 
