@@ -5,25 +5,22 @@ import { TattooFormData, TattooConcept } from "../types";
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 /**
- * ULTRA-ROBUST MODEL LIST
- * Targeted at users with specific previews (Nano Banana, Gemini 3.1, etc.)
+ * DEFINITIVE MODEL LIST BASED ON YOUR ACCOUNT DISCOVERY
+ * We prioritize Nano Banana 2 (Gemini 3.1 Flash Image) as it has free quota in your dashboard.
  */
 const MODELS = {
   TEXT: [
-    "gemini-2.0-flash-exp", // Priority: Experimental version often has separate quota
     "gemini-2.0-flash",
-    "gemini-2.0-flash-001",
+    "gemini-2.5-flash",
     "gemini-1.5-flash-latest",
-    "gemini-1.5-flash",
+    "gemini-3-flash-preview",
     "gemini-1.5-pro-latest"
   ],
   IMAGE: [
-    "imagen-3.0-generate-001",
-    "imagen-3.0-fast-generate-001",
-    "imagen-3.0-capability-001",
-    "gemini-2.0-flash-exp", // Gemini 2.0 EXP is very strong for image gen
-    "gemini-2.0-flash",
-    "gemini-2.0-flash-001"
+    "gemini-3.1-flash-image-preview", // Nano Banana 2 (Confirmed ID from your account)
+    "gemini-2.5-flash-image",        // Nano Banana
+    "gemini-2.0-flash-exp-image-generation",
+    "gemini-2.0-flash"
   ]
 };
 
@@ -45,13 +42,14 @@ async function generateWithWaterfall(options: any, modelList: string[]) {
       const status = error.status || error.response?.status;
       const message = error.message || "";
 
-      console.warn(`[Waterfall] ${modelName} failed. Status: ${status}. Message: ${message.substring(0, 100)}...`);
+      console.warn(`[Waterfall] ${modelName} failed. Status: ${status}. Msg: ${message.substring(0, 100)}...`);
 
-      // If we are at the end of the list and everything failed, we'll throw the last error
+      // We skip and try the next one instantly
       continue;
     }
   }
 
+  console.error("[Waterfall] CRITICAL FAILURE: All available models exhausted.", lastError);
   throw lastError;
 }
 
