@@ -141,18 +141,29 @@ BACKGROUND: PURE SOLID WHITE (#FFFFFF). NO SKIN. MASTERPIECE QUALITY.`,
   throw new Error("No image generated after trying all models");
 }
 
-export async function generateFinalTryOn(composedImageBase64: string): Promise<string> {
-  const prompt = `You are a photorealistic tattoo retoucher. Transform this overlay into a STUNNING, HYPER-REALISTIC photograph. 
-Ink must look sub-dermal, follow skin texture and anatomical curvature perfectly. 
-Match original lighting. Preserve all skin details.`;
+export async function generateFinalTryOn(bodyImageBase64: string, designImageBase64: string): Promise<string> {
+  const prompt = `Act as a world-class tattoo realism specialist. Project this tattoo design onto the body photo with PERFECTION.
+
+1. ANATOMICAL WRAPPING: The tattoo MUST wrap around the body part in 3D. It shouldn't look like a flat sticker. If it's on a back, it follows the spine and shoulder blades. If it's on an arm, it curves around the cylinder of the limb.
+2. FRESH TATTOO LOOK: Make it look like it was just finished. Add subtle redness (erythema) at the edges of the ink, slight skin inflammation/swelling, and the glossy nature of fresh ink.
+3. DERMAL INTEGRATION: The ink must look sub-dermal, appearing slightly blurred by the skin's top layer. Preserve all skin pores, textures, and hairs. 
+4. LIGHTING & SHADOW: The tattoo must be affected by the ambient light. Dark shadows on the body should make the ink darker; highlights on the body should create specular glints on the 'wet' ink.
+
+RETURN THE FINAL PHOTOGRAPH WITH THE TATTOO INTEGRATED.`;
 
   const options = {
     contents: {
       parts: [
         {
           inlineData: {
-            data: composedImageBase64.split(',')[1],
-            mimeType: composedImageBase64.split(';')[0].split(':')[1],
+            data: bodyImageBase64.split(',')[1],
+            mimeType: bodyImageBase64.split(';')[0].split(':')[1],
+          },
+        },
+        {
+          inlineData: {
+            data: designImageBase64.split(',')[1],
+            mimeType: designImageBase64.split(';')[0].split(':')[1],
           },
         },
         {

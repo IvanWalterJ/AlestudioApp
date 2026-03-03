@@ -638,22 +638,12 @@ export default function App() {
     setIsAutoPlacing(true);
     setErrorMessage(null);
     try {
-      // 1. First, let the AI still calculate a "starting point" for the composition internally
-      const placement = await analyzeAutoPlacement(bodyImage, selectedConcept.imageUrl);
-
-      // 2. Apply it to local state (this is needed for getComposedImageBase64 to work)
-      setTattooPos({ x: placement.x, y: placement.y });
-      setTattooScale(placement.scale);
-      setTattooRotation(placement.rotation);
-
-      // 3. Immediately trigger the high-res realist pass to "apply it to the canvas"
-      const base64 = await getComposedImageBase64();
-      if (!base64) throw new Error("Could not compose image");
-
-      setStep(5); // Go directly to final result
+      // Direct pass to realism engine with both images separately.
+      // This allows the AI to perform the anatomical warping itself.
+      setStep(5);
       setIsGeneratingFinal(true);
 
-      const finalUrl = await generateFinalTryOn(base64);
+      const finalUrl = await generateFinalTryOn(bodyImage, selectedConcept.imageUrl);
       setFinalTryOnImage(finalUrl);
       saveResult(finalUrl);
     } catch (err: any) {
@@ -670,14 +660,15 @@ export default function App() {
   };
 
   const handleGenerateFinalImage = async () => {
-    const base64 = await getComposedImageBase64();
-    if (!base64) return;
+    if (!bodyImage || !selectedConcept?.imageUrl) return;
 
     setIsGeneratingFinal(true);
     setStep(5);
 
     try {
-      const finalUrl = await generateFinalTryOn(base64);
+      // We pass both images separately so the AI can perform anatomical wrapping
+      // rather than just refining a flat sticker overlay.
+      const finalUrl = await generateFinalTryOn(bodyImage, selectedConcept.imageUrl);
       setFinalTryOnImage(finalUrl);
       saveResult(finalUrl); // persist to localStorage
     } catch (error: any) {
