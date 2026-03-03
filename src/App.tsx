@@ -3,8 +3,9 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 
 import { Loader2, Sparkles, ArrowRight, CheckCircle2, Upload, Camera, X, RefreshCw, SlidersHorizontal, Download, Eraser, Move, Undo, Redo, Calendar, Crown, ArrowLeft, Clock, Trash2, ImageIcon, ChevronDown, ChevronUp, Star, GalleryHorizontal, ZoomIn } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { generateConcepts, generateTattooImage, generateFinalTryOn } from './services/ai';
+import { generateConcepts, generateTattooImage, generateFinalTryOn, analyzeAutoPlacement } from './services/ai';
 import type { TattooFormData, TattooConcept, DesignHistoryEntry } from './types';
+import { Wand2, Layout, Scan, Zap, Layers } from 'lucide-react';
 
 type Point = { x: number, y: number };
 type Stroke = Point[];
@@ -16,6 +17,27 @@ type StudioState = {
   opacity: number;
   strokes: Stroke[];
 };
+
+const Logo = () => (
+  <div className="relative flex items-center gap-2 group cursor-pointer">
+    <div className="relative">
+      <div className="w-10 h-10 bg-zinc-100 rounded-xl flex items-center justify-center group-hover:rotate-12 transition-transform duration-500">
+        <svg viewBox="0 0 24 24" className="w-6 h-6 text-zinc-950 fill-current">
+          <path d="M12,2L4.5,20.29L5.21,21L12,18L18.79,21L19.5,20.29L12,2Z" />
+        </svg>
+      </div>
+      <motion.div
+        className="absolute -top-1 -right-1 w-4 h-4 bg-zinc-400 rounded-full border-2 border-zinc-950"
+        animate={{ scale: [1, 1.2, 1] }}
+        transition={{ duration: 2, repeat: Infinity }}
+      />
+    </div>
+    <div className="flex flex-col">
+      <span className="text-lg font-black tracking-tighter text-zinc-100 leading-none">INKVISION</span>
+      <span className="text-[10px] font-bold tracking-[0.2em] text-zinc-500 uppercase">Studio AI</span>
+    </div>
+  </div>
+);
 
 const LoadingInkAnimation = ({ label, subLabel }: { label: string, subLabel?: string }) => (
   <div className="flex flex-col items-center justify-center gap-6 py-8">
@@ -70,6 +92,7 @@ export default function App() {
   const [selectedConcept, setSelectedConcept] = useState<TattooConcept | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [historyPanelOpen, setHistoryPanelOpen] = useState(false);
+  const [isAutoPlacing, setIsAutoPlacing] = useState(false);
   const [savedResults, setSavedResults] = useState<string[]>(() => {
     try {
       const saved = localStorage.getItem('alestudio_results');
@@ -609,6 +632,32 @@ export default function App() {
     link.click();
   };
 
+  const handleAutoPlacement = async () => {
+    if (!bodyImage || !selectedConcept?.imageUrl || isAutoPlacing) return;
+
+    setIsAutoPlacing(true);
+    setErrorMessage(null);
+    try {
+      const placement = await analyzeAutoPlacement(bodyImage, selectedConcept.imageUrl);
+
+      // Animate to the new position
+      setTattooPos({ x: placement.x, y: placement.y });
+      setTattooScale(placement.scale);
+      setTattooRotation(placement.rotation);
+
+      saveStateToHistory({
+        pos: { x: placement.x, y: placement.y },
+        scale: placement.scale,
+        rotation: placement.rotation
+      });
+    } catch (err) {
+      console.error("Auto placement failed", err);
+      setErrorMessage("No pudimos calcular la ubicación automática. Inténtalo manualmente.");
+    } finally {
+      setIsAutoPlacing(false);
+    }
+  };
+
   const handleGenerateFinalImage = async () => {
     const base64 = await getComposedImageBase64();
     if (!base64) return;
@@ -683,11 +732,11 @@ export default function App() {
   };
 
   const navItems = [
-    { id: 1, label: 'Crear', icon: Sparkles, enabled: true },
-    { id: 3, label: 'Lienzo', icon: Camera, enabled: !!selectedConcept },
-    { id: 4, label: 'Estudio', icon: SlidersHorizontal, enabled: !!bodyImage && !!selectedConcept },
-    { id: 5, label: 'Resultados', icon: CheckCircle2, enabled: !!finalTryOnImage },
-    { id: 6, label: 'Agendar', icon: Calendar, enabled: true },
+    { id: 1, label: 'Diseño', icon: Wand2, enabled: true },
+    { id: 3, label: 'Lienzo', icon: Scan, enabled: !!selectedConcept },
+    { id: 4, label: 'Estudio', icon: Layers, enabled: !!bodyImage && !!selectedConcept },
+    { id: 5, label: 'Final', icon: Zap, enabled: !!finalTryOnImage },
+    { id: 6, label: 'Agenda', icon: Calendar, enabled: true },
     { id: 7, label: 'Galería', icon: GalleryHorizontal, enabled: savedResults.length > 0 },
   ];
 
@@ -697,16 +746,9 @@ export default function App() {
       {/* Sidebar - Desktop */}
       <aside className="hidden md:flex w-72 h-screen sticky top-0 border-r border-zinc-900 bg-zinc-950 flex-col z-50 overflow-hidden">
         {/* Logo */}
-        <div className="p-6 border-b border-zinc-900">
-          <div className="flex items-center gap-3 group cursor-pointer" onClick={() => setStep(1)}>
-            <div className="relative">
-              <div className="absolute inset-0 bg-zinc-100 blur-md opacity-20 group-hover:opacity-40 transition-opacity"></div>
-              <Crown className="w-7 h-7 text-zinc-100 relative z-10" />
-            </div>
-            <div>
-              <span className="text-base font-black tracking-[0.12em] uppercase bg-gradient-to-r from-zinc-100 to-zinc-400 bg-clip-text text-transparent block leading-none">AL ESTILO</span>
-              <span className="text-[10px] text-zinc-600 tracking-widest uppercase">Tattoo Studio</span>
-            </div>
+        <div className="p-8">
+          <div onClick={() => setStep(1)} className="cursor-pointer">
+            <Logo />
           </div>
         </div>
 
@@ -864,9 +906,8 @@ export default function App() {
         {/* Mobile Header */}
         <header className="md:hidden border-b border-zinc-900 bg-zinc-950/90 backdrop-blur-xl sticky top-0 z-50">
           <div className="px-4 h-14 flex items-center justify-between">
-            <div className="flex items-center gap-2 cursor-pointer" onClick={() => setStep(1)}>
-              <Crown className="w-5 h-5 text-zinc-100" />
-              <span className="text-sm font-black tracking-widest uppercase text-zinc-100">AL ESTILO</span>
+            <div className="flex items-center gap-2 cursor-pointer scale-90 origin-left" onClick={() => setStep(1)}>
+              <Logo />
             </div>
             <div className="flex items-center gap-2">
               {selectedConcept?.imageUrl && (
@@ -1298,8 +1339,30 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Controls Sidebar */}
                   <div className="flex flex-col gap-6">
+                    {/* Auto-Placement Button */}
+                    <button
+                      onClick={handleAutoPlacement}
+                      disabled={isAutoPlacing}
+                      className={`w-full py-4 rounded-2xl border flex items-center justify-center gap-3 transition-all relative overflow-hidden group ${isAutoPlacing
+                        ? 'bg-zinc-900 border-zinc-800 text-zinc-500'
+                        : 'bg-zinc-100 border-zinc-100 text-zinc-950 hover:bg-white shadow-xl shadow-zinc-100/10'
+                        }`}
+                    >
+                      {isAutoPlacing ? (
+                        <>
+                          <Loader2 className="w-5 h-5 animate-spin" />
+                          <span className="font-semibold text-sm">Escaneando anatomía...</span>
+                        </>
+                      ) : (
+                        <>
+                          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/40 to-transparent -translate-x-full group-hover:animate-shimmer" />
+                          <Sparkles className="w-5 h-5" />
+                          <span className="font-bold text-sm">IA: Ubicación Mágica</span>
+                        </>
+                      )}
+                    </button>
+
                     {/* Mode Switcher & History */}
                     <div className="flex items-center gap-2">
                       <div className="bg-zinc-900/30 border border-zinc-800/50 rounded-2xl p-2 flex gap-2 flex-1">
@@ -1570,7 +1633,7 @@ export default function App() {
                 <div className="flex flex-col md:flex-row md:items-center justify-between mb-10 gap-4">
                   <div>
                     <h1 className="text-4xl font-light tracking-tight mb-2">Reserva tu cita.</h1>
-                    <p className="text-zinc-400">Elige el día y la hora para hacer realidad tu diseño en Al Estilo Estudio.</p>
+                    <p className="text-zinc-400">Elige el día y la hora para hacer realidad tu diseño en INKVISION STUDIO.</p>
                   </div>
                   <button
                     onClick={() => setStep(5)}

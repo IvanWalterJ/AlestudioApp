@@ -164,3 +164,66 @@ The result should be so realistic that a tattoo artist would believe it's a real
 
   throw new Error("No image generated");
 }
+export async function analyzeAutoPlacement(bodyImageBase64: string, designImageBase64: string): Promise<{ x: number, y: number, scale: number, rotation: number }> {
+  const prompt = `You are a master tattoo placement specialist. 
+I am providing two images:
+1. A photo of a body part where the client wants a tattoo.
+2. The tattoo design asset.
+
+Your task is to determine the absolute BEST anatomical position, scale, and rotation for this tattoo so it looks professional, aesthetic, and flows with the body's natural curves.
+
+ANALYSIS RULES:
+- Find the flat or muscular areas (like the center of the forearm, shoulder, or calf).
+- Avoid placing it over clothing or complex background.
+- Adjust the scale so it's impactful but doesn't wrap awkwardly unless the design is large.
+- The rotation should align with the limb or body part's axis.
+
+RETURN ONLY A JSON OBJECT with these normalized values:
+- x: Horizontal offset from center (-100 to 100). 0 is center.
+- y: Vertical offset from center (-100 to 100). 0 is center.
+- scale: Relative scale (0.5 to 2.5). 1.0 is standard.
+- rotation: Rotation in degrees (-180 to 180).
+
+Example: { "x": 10, "y": -20, "scale": 1.2, "rotation": 15 }`;
+
+  const response = await ai.models.generateContent({
+    model: "gemini-3-flash-preview",
+    contents: {
+      parts: [
+        {
+          inlineData: {
+            data: bodyImageBase64.split(',')[1],
+            mimeType: bodyImageBase64.split(';')[0].split(':')[1],
+          }
+        },
+        {
+          inlineData: {
+            data: designImageBase64.split(',')[1],
+            mimeType: designImageBase64.split(';')[0].split(':')[1],
+          }
+        },
+        { text: prompt }
+      ]
+    },
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          x: { type: Type.NUMBER },
+          y: { type: Type.NUMBER },
+          scale: { type: Type.NUMBER },
+          rotation: { type: Type.NUMBER }
+        },
+        required: ["x", "y", "scale", "rotation"]
+      }
+    }
+  });
+
+  try {
+    return JSON.parse(response.text || '{ "x": 0, "y": 0, "scale": 1, "rotation": 0 }');
+  } catch (e) {
+    console.error("Failed to parse placement", e);
+    return { x: 0, y: 0, scale: 1, rotation: 0 };
+  }
+}
