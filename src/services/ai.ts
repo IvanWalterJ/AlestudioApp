@@ -4,6 +4,39 @@ import { TattooFormData, TattooConcept } from "../types";
 // Initialize the Gemini API client
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
+const MODELS = {
+  PRIMARY: "gemini-2.0-flash",
+  BACKUP: "gemini-1.5-flash",
+  IMAGE: "imagen-3.0-generate-001"
+};
+
+/**
+ * Generic waterfall helper to retry with backup model if primary fails
+ */
+async function generateWithWaterfall(options: any) {
+  try {
+    // Try Primary Model (2.0-flash)
+    return await ai.models.generateContent({
+      ...options,
+      model: MODELS.PRIMARY
+    });
+  } catch (error: any) {
+    console.warn(`Primary model (${MODELS.PRIMARY}) failed or saturated. Falling back to ${MODELS.BACKUP}...`, error);
+
+    // Check if it's a "quota" or "overloaded" error (standard 429/503)
+    // Even if not, we fallback to ensure service continuity as requested.
+    try {
+      return await ai.models.generateContent({
+        ...options,
+        model: MODELS.BACKUP
+      });
+    } catch (backupError) {
+      console.error("Critical: Both primary and backup models failed.", backupError);
+      throw backupError;
+    }
+  }
+}
+
 export async function generateConcepts(data: TattooFormData): Promise<TattooConcept[]> {
   const referenceContext = data.referenceImage
     ? "The client has provided a reference image to guide the style and composition."
@@ -19,13 +52,11 @@ ${referenceContext}
 Generate 3 unique, highly creative tattoo concepts that are STUNNING and IMPACTFUL.
 For each concept, provide:
 1. A catchy title.
-2. A narrative explaining the design and how it connects to their story (in Spanish, as the user is speaking Spanish).
+2. A narrative explaining the design and how it connects to their story (in Spanish).
 3. A technical prompt for a high-end image generation model. 
    THE TECHNICAL PROMPT MUST SPECIFY:
-   - Pure, hospital-white background (CRITICAL for clean assets).
-   - Crisp, high-contrast black ink (unless the style is specifically color).
-   - Artistic, professional composition (e.g., 'masterpiece', 'intricate details', 'sharp focus').
-   - Specific motifs that make the design feel premium and state-of-the-art.
+   - Pure, hospital-white background.
+   - Crisp, high-contrast black ink (unless color style).
    - NO SKIN, NO BACKGROUND NOISE, NO HUMANS. JUST THE TATTOO DESIGN ON WHITE.`;
 
   const parts: any[] = [{ text: prompt }];
@@ -38,8 +69,7 @@ For each concept, provide:
     });
   }
 
-  const response = await ai.models.generateContent({
-    model: "gemini-3-flash-preview",
+  const response = await generateWithWaterfall({
     contents: { parts },
     config: {
       responseMimeType: "application/json",
@@ -48,9 +78,9 @@ For each concept, provide:
         items: {
           type: Type.OBJECT,
           properties: {
-            title: { type: Type.STRING, description: "Concept title (in Spanish)" },
-            narrative: { type: Type.STRING, description: "Explanation for the client (in Spanish)" },
-            technicalPrompt: { type: Type.STRING, description: "Prompt for image generation model (in English)" }
+            title: { type: Type.STRING },
+            narrative: { type: Type.STRING },
+            technicalPrompt: { type: Type.STRING }
           },
           required: ["title", "narrative", "technicalPrompt"]
         }
@@ -67,18 +97,16 @@ For each concept, provide:
 }
 
 export async function generateTattooImage(technicalPrompt: string, style?: string): Promise<string> {
-  const styleInstruction = style ? ` MUST BE STRICTLY IN ${style.toUpperCase()} TATTOO STYLE.` : '';
-
+  // Image generation doesn't support the same waterfall logic as text (models are different)
+  // But we use the requested Imagen 3.0 model.
   const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash-image',
+    model: MODELS.IMAGE,
     contents: {
       parts: [
         {
-          text: `A professional, high-impact tattoo flash design. Masterpiece quality.
-SHARP FOCUS, CLEAN LINES, ULTRA-HIGH DETAIL.
-BACKGROUND: PURE SOLID WHITE (#FFFFFF). No shadows, no gradients on background.
-STYLE: ${style ? style.toUpperCase() : 'ARTISTIC'}.
-SUBJECT: ${technicalPrompt}`,
+          text: `A professional tattoo flash design SUBJECT: ${technicalPrompt}. 
+STYLE: ${style || 'Artistic'}. 
+BACKGROUND: PURE SOLID WHITE (#FFFFFF). NO SKIN. MASTERPIECE QUALITY.`,
         },
       ],
     },
@@ -99,48 +127,14 @@ SUBJECT: ${technicalPrompt}`,
 }
 
 export async function generateFinalTryOn(composedImageBase64: string): Promise<string> {
-  const prompt = `You are the world's best photorealistic tattoo retoucher — your work is indistinguishable from real photographs of healed tattoos.
+  const prompt = `You are a photorealistic tattoo retoucher. Transform this overlay into a STUNNING, HYPER-REALISTIC photograph. 
+Ink must look sub-dermal, follow skin texture, pores, and anatomical curvature perfectly. 
+Match original lighting. Preserve all skin details.`;
 
-I am giving you a photograph of a human body with a digital tattoo design overlaid on the skin. Your job is to transform this into a STUNNING, HYPER-REALISTIC photograph that looks like it was taken by a professional tattoo photographer with a macro lens.
-
-ABSOLUTE REQUIREMENTS — follow every single one:
-
-1. SKIN TEXTURE IS KING:
-   - The tattoo ink sits BENEATH the skin's surface layer (epidermis).
-   - You MUST render visible skin pores, fine body hairs, and natural skin texture ON TOP of the tattoo ink.
-   - Add subtle specular highlights from skin oils that catch light, even over dark ink areas.
-   - Include micro-level ink bleeding at the edges of lines — real tattoos never have perfectly crisp digital edges.
-
-2. 3D ANATOMICAL WRAPPING:
-   - The design MUST conform to the 3D topology of the body — wrap around muscles, follow the curves of bones, stretch over tendons.
-   - Cylindrical body parts (arms, legs) require perspective foreshortening of the design.
-   - The tattoo must feel like it was tattooed directly onto THAT specific body, not pasted on.
-
-3. LIGHTING INTEGRATION:
-   - Match the EXACT lighting environment of the original photo.
-   - Apply cast shadows, ambient occlusion, and specular highlights to the tattoo ink consistently with the rest of the skin.
-   - Dark areas of the body should darken the tattoo proportionally. Lit areas should show more detail.
-
-4. INK REALISM:
-   - Black ink should look like saturated carbon pigment under skin, NOT digital black (#000000).
-   - Color ink (if present) should look slightly muted and warm, as if filtered through a thin layer of skin.
-   - Simulate the subtle "raised" quality of freshly healed tattoos with micro-shadows at ink boundaries.
-   - Fine lines should show slight ink spread. Bold lines should show gradient density from center to edge.
-
-5. PHOTOGRAPHIC QUALITY:
-   - The final result should look like a professional photograph: shallow depth of field, natural bokeh in background.
-   - Maintain the exact same camera angle and focal length as the original image.
-   - Preserve all skin tones, body hair, freckles, and natural imperfections.
-
-6. PRESERVATION:
-   - DO NOT alter the person's face, body shape, clothing, background, or any non-tattoo area.
-   - DO NOT add new elements, tattoos, or modifications beyond what is shown in the overlay.
-   - DO NOT change the composition or cropping of the image.
-
-The result should be so realistic that a tattoo artist would believe it's a real healed tattoo photograph.`;
-
+  // Try-on is image-to-image, usually Imagen supports this via specific models or Gemini 2.0 Flash Vision
+  // We use the image model requested.
   const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash-image',
+    model: MODELS.IMAGE,
     contents: {
       parts: [
         {
@@ -164,30 +158,12 @@ The result should be so realistic that a tattoo artist would believe it's a real
 
   throw new Error("No image generated");
 }
+
 export async function analyzeAutoPlacement(bodyImageBase64: string, designImageBase64: string): Promise<{ x: number, y: number, scale: number, rotation: number }> {
-  const prompt = `You are a master tattoo placement specialist. 
-I am providing two images:
-1. A photo of a body part where the client wants a tattoo.
-2. The tattoo design asset.
+  const prompt = `Find the absolute BEST anatomical position, scale, and rotation for this tattoo.
+RETURN ONLY JSON: { x: number (-100 to 100), y: number (-100 to 100), scale: number (0.5 to 2.5), rotation: number (-180 to 180) }`;
 
-Your task is to determine the absolute BEST anatomical position, scale, and rotation for this tattoo so it looks professional, aesthetic, and flows with the body's natural curves.
-
-ANALYSIS RULES:
-- Find the flat or muscular areas (like the center of the forearm, shoulder, or calf).
-- Avoid placing it over clothing or complex background.
-- Adjust the scale so it's impactful but doesn't wrap awkwardly unless the design is large.
-- The rotation should align with the limb or body part's axis.
-
-RETURN ONLY A JSON OBJECT with these normalized values:
-- x: Horizontal offset from center (-100 to 100). 0 is center.
-- y: Vertical offset from center (-100 to 100). 0 is center.
-- scale: Relative scale (0.5 to 2.5). 1.0 is standard.
-- rotation: Rotation in degrees (-180 to 180).
-
-Example: { "x": 10, "y": -20, "scale": 1.2, "rotation": 15 }`;
-
-  const response = await ai.models.generateContent({
-    model: "gemini-3-flash-preview",
+  const response = await generateWithWaterfall({
     contents: {
       parts: [
         {
