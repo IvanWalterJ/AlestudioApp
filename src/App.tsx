@@ -632,29 +632,40 @@ export default function App() {
     link.click();
   };
 
-  const handleAutoPlacement = async () => {
+  const handleArtisticProjection = async () => {
     if (!bodyImage || !selectedConcept?.imageUrl || isAutoPlacing) return;
 
     setIsAutoPlacing(true);
     setErrorMessage(null);
     try {
+      // 1. First, let the AI still calculate a "starting point" for the composition internally
       const placement = await analyzeAutoPlacement(bodyImage, selectedConcept.imageUrl);
 
-      // Animate to the new position
+      // 2. Apply it to local state (this is needed for getComposedImageBase64 to work)
       setTattooPos({ x: placement.x, y: placement.y });
       setTattooScale(placement.scale);
       setTattooRotation(placement.rotation);
 
-      saveStateToHistory({
-        pos: { x: placement.x, y: placement.y },
-        scale: placement.scale,
-        rotation: placement.rotation
-      });
-    } catch (err) {
-      console.error("Auto placement failed", err);
-      setErrorMessage("No pudimos calcular la ubicación automática. Inténtalo manualmente.");
+      // 3. Immediately trigger the high-res realist pass to "apply it to the canvas"
+      const base64 = await getComposedImageBase64();
+      if (!base64) throw new Error("Could not compose image");
+
+      setStep(5); // Go directly to final result
+      setIsGeneratingFinal(true);
+
+      const finalUrl = await generateFinalTryOn(base64);
+      setFinalTryOnImage(finalUrl);
+      saveResult(finalUrl);
+    } catch (err: any) {
+      console.error("Artistic projection failed", err);
+      const msg = err?.status === 503 || err?.message?.includes('503')
+        ? "La IA de proyección está saturada. Intentá de nuevo en unos segundos."
+        : "No pudimos proyectar el diseño automáticamente. Intentalo de nuevo.";
+      setErrorMessage(msg);
+      setStep(4);
     } finally {
       setIsAutoPlacing(false);
+      setIsGeneratingFinal(false);
     }
   };
 
@@ -1340,9 +1351,9 @@ export default function App() {
                   </div>
 
                   <div className="flex flex-col gap-6">
-                    {/* Auto-Placement Button */}
+                    {/* Artistic Projection Button */}
                     <button
-                      onClick={handleAutoPlacement}
+                      onClick={handleArtisticProjection}
                       disabled={isAutoPlacing}
                       className={`w-full py-4 rounded-2xl border flex items-center justify-center gap-3 transition-all relative overflow-hidden group ${isAutoPlacing
                         ? 'bg-zinc-900 border-zinc-800 text-zinc-500'
@@ -1357,8 +1368,8 @@ export default function App() {
                       ) : (
                         <>
                           <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/40 to-transparent -translate-x-full group-hover:animate-shimmer" />
-                          <Sparkles className="w-5 h-5" />
-                          <span className="font-bold text-sm">IA: Ubicación Mágica</span>
+                          <Wand2 className="w-5 h-5" />
+                          <span className="font-bold text-sm">IA: Proyección Artística</span>
                         </>
                       )}
                     </button>
