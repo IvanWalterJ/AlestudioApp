@@ -5,46 +5,43 @@ import { TattooFormData, TattooConcept } from "../types";
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 const MODELS = {
-  TEXT_PRIMARY: "gemini-2.0-flash",
-  TEXT_BACKUP: "gemini-1.5-flash",
-  IMAGE_PRIMARY: "imagen-3.0-generate-001",
-  IMAGE_BACKUP: "gemini-2.0-flash"
+  TEXT: ["gemini-2.0-flash", "gemini-1.5-flash-latest", "gemini-1.5-flash", "gemini-1.5-pro-latest"],
+  IMAGE: ["imagen-3.0-generate-001", "gemini-2.0-flash"]
 };
 
 /**
- * Generic waterfall helper to retry with backup model if primary fails
+ * Enhanced waterfall helper to try multiple models in sequence
  */
-async function generateWithWaterfall(options: any, isImage: boolean = false) {
-  const primaryModel = isImage ? MODELS.IMAGE_PRIMARY : MODELS.TEXT_PRIMARY;
-  const backupModel = isImage ? MODELS.IMAGE_BACKUP : MODELS.TEXT_BACKUP;
+async function generateWithWaterfall(options: any, modelList: string[]) {
+  let lastError: any = null;
 
-  try {
-    // Try Primary Model
-    return await ai.models.generateContent({
-      ...options,
-      model: primaryModel
-    });
-  } catch (error: any) {
-    console.warn(`${isImage ? 'Image' : 'Text'} primary model (${primaryModel}) failed. Falling back to ${backupModel}...`, error);
-
+  for (const modelName of modelList) {
     try {
+      console.log(`Trying model: ${modelName}`);
       return await ai.models.generateContent({
         ...options,
-        model: backupModel
+        model: modelName
       });
-    } catch (backupError: any) {
-      // Final fallback to 1.5-flash if everything else fails
-      if (backupModel !== MODELS.TEXT_BACKUP) {
-        console.warn(`Backup model (${backupModel}) also failed. Final fallback to ${MODELS.TEXT_BACKUP}...`, backupError);
-        return await ai.models.generateContent({
-          ...options,
-          model: MODELS.TEXT_BACKUP
-        });
+    } catch (error: any) {
+      lastError = error;
+      const status = error.status || (error.response?.status);
+      const message = error.message || "";
+
+      console.warn(`Model ${modelName} failed (Status: ${status}). Message: ${message}`);
+
+      // If it's a 404 (Not Found) or 429 (Rate Limit/Exhausted) or 503 (Overloaded), try next model
+      if (status === 404 || status === 429 || status === 503 || message.includes("not found") || message.includes("exhausted")) {
+        continue;
       }
-      console.error("Critical: All AI models failed.", backupError);
-      throw backupError;
+
+      // For other critical errors, we might want to throw immediately, 
+      // but let's be safe and try the next one anyway to ensure service.
+      continue;
     }
   }
+
+  console.error("Critical: All models in waterfall failed.", lastError);
+  throw lastError;
 }
 
 export async function generateConcepts(data: TattooFormData): Promise<TattooConcept[]> {
@@ -66,7 +63,7 @@ For each concept, provide:
 3. A technical prompt for a high-end image generation model. 
    THE TECHNICAL PROMPT MUST SPECIFY:
    - Pure, hospital-white background.
-   - Crisp, high-contrast black ink (unless color style).
+   - Crisp, high-contrast black ink.
    - NO SKIN, NO BACKGROUND NOISE, NO HUMANS. JUST THE TATTOO DESIGN ON WHITE.`;
 
   const parts: any[] = [{ text: prompt }];
@@ -96,7 +93,7 @@ For each concept, provide:
         }
       }
     }
-  });
+  }, MODELS.TEXT);
 
   try {
     return JSON.parse(response.text || "[]");
@@ -124,7 +121,7 @@ BACKGROUND: PURE SOLID WHITE (#FFFFFF). NO SKIN. MASTERPIECE QUALITY.`,
     }
   };
 
-  const response = await generateWithWaterfall(options, true);
+  const response = await generateWithWaterfall(options, MODELS.IMAGE);
 
   for (const part of response.candidates?.[0]?.content?.parts || []) {
     if (part.inlineData) {
@@ -132,12 +129,12 @@ BACKGROUND: PURE SOLID WHITE (#FFFFFF). NO SKIN. MASTERPIECE QUALITY.`,
     }
   }
 
-  throw new Error("No image generated");
+  throw new Error("No image generated after trying all models");
 }
 
 export async function generateFinalTryOn(composedImageBase64: string): Promise<string> {
   const prompt = `You are a photorealistic tattoo retoucher. Transform this overlay into a STUNNING, HYPER-REALISTIC photograph. 
-Ink must look sub-dermal, follow skin texture, pores, and anatomical curvature perfectly. 
+Ink must look sub-dermal, follow skin texture and anatomical curvature perfectly. 
 Match original lighting. Preserve all skin details.`;
 
   const options = {
@@ -156,7 +153,7 @@ Match original lighting. Preserve all skin details.`;
     }
   };
 
-  const response = await generateWithWaterfall(options, true);
+  const response = await generateWithWaterfall(options, MODELS.IMAGE);
 
   for (const part of response.candidates?.[0]?.content?.parts || []) {
     if (part.inlineData) {
@@ -164,7 +161,7 @@ Match original lighting. Preserve all skin details.`;
     }
   }
 
-  throw new Error("No image generated");
+  throw new Error("No image generated for try-on");
 }
 
 export async function analyzeAutoPlacement(bodyImageBase64: string, designImageBase64: string): Promise<{ x: number, y: number, scale: number, rotation: number }> {
@@ -202,7 +199,7 @@ RETURN ONLY JSON: { x: number (-100 to 100), y: number (-100 to 100), scale: num
         required: ["x", "y", "scale", "rotation"]
       }
     }
-  });
+  }, MODELS.TEXT);
 
   try {
     return JSON.parse(response.text || '{ "x": 0, "y": 0, "scale": 1, "rotation": 0 }');
